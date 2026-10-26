@@ -24,7 +24,7 @@ Python 3.13 is required.
 
 ```bash
 python3.13 -m venv .venv && source .venv/bin/activate
-pip install -r requirements_test.txt -r requirements_lint.txt aiomqtt aiortc
+pip install -r requirements_test.txt -r requirements_lint.txt aiomqtt
 ruff check . && ruff format --check .
 pytest
 ```

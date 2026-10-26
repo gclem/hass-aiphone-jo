@@ -13,8 +13,7 @@
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/gclem/hass-aiphone-jo/issues",
   "requirements": [
-    "aiomqtt>=2.3",
-    "aiortc>=1.14.0"
+    "aiomqtt>=2.3"
   ],
   "version": "0.2.2"
 }
