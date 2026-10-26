@@ -1,15 +1,20 @@
 """Bridge tests against a real go2rtc server (set GO2RTC_URL to run them).
 
 A local WebRTC peer plays the relay: it sends audio (PCMU) and video (H264)
-with an offer shaped like the relay's (named mids, sdes:mid extension).
+with an offer shaped like the relay's (named mids, sdes:mid extension). The
+continuous live view also needs ffmpeg on the go2rtc host.
 """
 
 from __future__ import annotations
 
 import asyncio
+import itertools
 import os
 import re
 import shutil
+import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import aiohttp
@@ -78,12 +83,15 @@ async def _relay(bridge: Go2RtcBridge) -> RTCPeerConnection:
     return pc
 
 
-async def _watch(bridge: Go2RtcBridge, seconds: float = 3) -> dict[str, int]:
-    """Connect a viewer through the WebSocket API; count received frames."""
+@asynccontextmanager
+async def _viewer(
+    bridge: Go2RtcBridge, stream: str | None = None
+) -> AsyncIterator[dict[str, list[float]]]:
+    """Viewer connected through the WebSocket API; yields frame arrival times."""
     pc = RTCPeerConnection()
     pc.addTransceiver("video", direction="recvonly")
     pc.addTransceiver("audio", direction="recvonly")
-    received = {"video": 0, "audio": 0}
+    received: dict[str, list[float]] = {"video": [], "audio": []}
     readers: list[asyncio.Future[None]] = []
     answered: asyncio.Future[str] = asyncio.get_running_loop().create_future()
 
@@ -95,7 +103,7 @@ async def _watch(bridge: Go2RtcBridge, seconds: float = 3) -> dict[str, int]:
                     await track.recv()
                 except Exception:
                     return
-                received[track.kind] += 1
+                received[track.kind].append(time.monotonic())
 
         readers.append(asyncio.ensure_future(read()))
 
@@ -103,18 +111,36 @@ async def _watch(bridge: Go2RtcBridge, seconds: float = 3) -> dict[str, int]:
         if message.get("type") == "webrtc/answer" and not answered.done():
             answered.set_result(message["value"])
 
-    viewer = await bridge.async_open_viewer(on_message)
+    viewer = await bridge.async_open_viewer(on_message, stream)
     try:
         await viewer.async_send("webrtc/offer", await _gathered(pc))
         answer = await asyncio.wait_for(answered, 10)
         await pc.setRemoteDescription(RTCSessionDescription(answer, "answer"))
-        await asyncio.sleep(seconds)
+        yield received
     finally:
         await viewer.async_close()
         await pc.close()
         for reader in readers:
             reader.cancel()
-    return received
+
+
+async def _watch(bridge: Go2RtcBridge, seconds: float = 3) -> dict[str, int]:
+    """Count the frames a viewer receives during ``seconds``."""
+    async with _viewer(bridge) as received:
+        await asyncio.sleep(seconds)
+    return {kind: len(times) for kind, times in received.items()}
+
+
+async def _frames_after(
+    received: dict[str, list[float]], since: float, limit: float, count: int = 30
+) -> float:
+    """Wait for ``count`` video frames after ``since``; return the first one's time."""
+    async with asyncio.timeout(limit):
+        while True:
+            after = [t for t in received["video"] if t > since]
+            if len(after) >= count:
+                return after[0]
+            await asyncio.sleep(0.1)
 
 
 @pytest.fixture
@@ -158,3 +184,34 @@ async def test_next_session_on_same_stream(bridge: Go2RtcBridge) -> None:
         finally:
             await relay.close()
         await asyncio.sleep(1)
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg is not installed")
+async def test_relay_keeps_viewers_across_sessions(bridge: Go2RtcBridge) -> None:
+    """A relay viewer keeps receiving when the next session replaces the first."""
+    assert await bridge.async_relay_supported()
+    await bridge.async_ensure_stream()
+    await bridge.async_ensure_relay()
+    relay = await _relay(bridge)
+    try:
+        await bridge.async_wait_video(15)
+        async with _viewer(bridge, bridge.relay) as received:
+            await _frames_after(received, 0, 20)
+            assert received["audio"]
+            image = await bridge.async_frame(bridge.relay)
+            assert image.startswith(b"\xff\xd8")
+
+            # The station ends the session; the next one is pushed shortly after.
+            await relay.close()
+            ended = time.monotonic()
+            await asyncio.sleep(1)
+            relay = await _relay(bridge)
+            await _frames_after(received, ended + 0.5, 30)
+            audio = len(received["audio"])
+            await asyncio.sleep(1)
+            assert len(received["audio"]) > audio
+        video = [t for t in received["video"] if t > ended - 1]
+        gap = max(b - a for a, b in itertools.pairwise(video))
+        print(f"longest video gap across the renewal: {gap:.1f} s")
+    finally:
+        await relay.close()

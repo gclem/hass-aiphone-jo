@@ -12,6 +12,12 @@ All notable changes to this integration.
 - Pairing: when the monitor ends the "add smartphone" mode while the
   certificate is being checked, the approval is kept and the pairing can be
   resumed, instead of failing with an unknown error.
+- Continuous live view: while the camera is open, a new monitoring session is
+  opened each time the entrance station ends one (about every minute), and
+  the live view continues after an interruption of a few seconds. Sessions
+  stop a few seconds after the last viewer leaves. This relies on go2rtc's
+  RTSP server and ffmpeg (see the README for an external go2rtc server);
+  without the RTSP server, the live view stops with each session as before.
 
 ## 0.3.0
 

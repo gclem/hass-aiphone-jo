@@ -18,7 +18,12 @@ from homeassistant.helpers import issue_registry as ir
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.aiphone_jo.const import CONF_IMAGE_REFRESH, CONF_STATION, DOMAIN
-from custom_components.aiphone_jo.vendor.aiphone_jo import Output, StationBusyError
+from custom_components.aiphone_jo.media import LIVE_ENDED, LIVE_STOPPED
+from custom_components.aiphone_jo.vendor.aiphone_jo import (
+    AiphoneJoError,
+    Output,
+    StationBusyError,
+)
 
 from .conftest import ClientHolder, FakeClient, until
 from .fake_go2rtc import JPEG, VIEWER_ANSWER, VIEWER_CANDIDATE, FakeGo2Rtc
@@ -32,6 +37,7 @@ def fast_polling(monkeypatch: pytest.MonkeyPatch) -> None:
     """Detect the end of sessions quickly."""
     monkeypatch.setattr("custom_components.aiphone_jo.media.SESSION_POLL", 0.02)
     monkeypatch.setattr("custom_components.aiphone_jo.media.VIDEO_TIMEOUT", 0.5)
+    monkeypatch.setattr("custom_components.aiphone_jo.media.VIEWER_GRACE", 0.05)
 
 
 @pytest.fixture
@@ -84,13 +90,16 @@ async def test_image_opens_short_session(
     assert await _image(hass) == JPEG
     live = client.lives[0]
     assert live.terminal == 101
-    assert live.renew is False
+    # Renewable, so that a viewer arriving meanwhile can keep it.
+    assert live.renew is True
     assert live.exited.is_set()
     assert live.answer is not None
     assert "a=mid:audio" in live.answer
     stream = f"aiphone_jo_{camera_entry.entry_id}"
     assert go2rtc.frames == [stream]
     assert [name for name, _ in go2rtc.ingests] == [stream]
+    assert [name for name, _ in go2rtc.puts] == [stream, f"{stream}_live"]
+    assert go2rtc.streams[f"{stream}_live"][0].startswith(f"ffmpeg:{stream}#")
 
 
 async def test_image_cached_for_refresh_interval(
@@ -256,7 +265,9 @@ async def test_webrtc_live_view(
     assert candidate["type"] == "candidate"
     assert candidate["candidate"]["candidate"] == VIEWER_CANDIDATE
     assert go2rtc.viewer_messages[0] == {"type": "webrtc/offer", "value": "v=0 offer"}
-    assert client.lives[0].renew is False
+    assert client.lives[0].renew is True
+    relay = f"aiphone_jo_{camera_entry.entry_id}_live"
+    assert go2rtc.viewer_streams == [relay]
     assert camera_entry.runtime_data.media.live
 
     await first_ws.send_json_auto_id(
@@ -277,6 +288,7 @@ async def test_webrtc_live_view(
 
     # Images come from the running live view, without a new session.
     assert await _image(hass) == JPEG
+    assert go2rtc.frames == [relay]
 
     second_ws = await hass_ws_client(hass)
     second = await _offer(second_ws)
@@ -300,22 +312,86 @@ async def test_webrtc_live_view(
     assert not camera_entry.runtime_data.media.live
 
 
-async def test_webrtc_station_ends_session(
+async def test_webrtc_continuous(
     hass: HomeAssistant,
     camera_entry: MockConfigEntry,
     client_holder: ClientHolder,
     go2rtc: FakeGo2Rtc,
     hass_ws_client: Any,
 ) -> None:
-    """When the station ends the session, viewers are told and disconnected."""
+    """Renewed sessions are pushed into the stream; viewers stay connected."""
     client = _client(client_holder)
     ws = await hass_ws_client(hass)
     await _offer(ws)
     await _events(ws, 3)
+    live = client.lives[0]
+    stream = f"aiphone_jo_{camera_entry.entry_id}"
+    for _ in range(2):
+        live.end()
+        await asyncio.sleep(0.1)
+        await live.renewed()
+    assert [name for name, _ in go2rtc.ingests] == [stream] * 3
+    assert len(live.answers) == 3
+    assert len(client.lives) == 1
+    assert go2rtc.viewers_open == 1
+    assert not live.exited.is_set()
+    assert camera_entry.runtime_data.media.live
+
+    # Renewal gave up: viewers are told and disconnected.
+    live.give_up(AiphoneJoError("unreachable"))
+    (error,) = await _events(ws, 1)
+    assert error == {"type": "error", "code": "live_ended", "message": LIVE_STOPPED}
+    await until(lambda: live.exited.is_set())
+    await until(lambda: go2rtc.viewers_open == 0)
+    assert not camera_entry.runtime_data.media.live
+
+
+async def test_webrtc_viewer_grace(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    go2rtc: FakeGo2Rtc,
+    hass_ws_client: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The session outlives the last viewer briefly, for a viewer coming back."""
+    monkeypatch.setattr("custom_components.aiphone_jo.media.VIEWER_GRACE", 0.5)
+    client = _client(client_holder)
+    ws = await hass_ws_client(hass)
+    first = await _offer(ws)
+    await _events(ws, 3)
+    await ws.send_json_auto_id({"type": "unsubscribe_events", "subscription": first})
+    await ws.receive_json()
+    await until(lambda: go2rtc.viewers_open == 0)
+    assert camera_entry.runtime_data.media.live
+
+    await _offer(ws)
+    await _events(ws, 3)
+    assert len(client.lives) == 1
+    await asyncio.sleep(0.6)
+    assert not client.lives[0].exited.is_set()
+
+
+async def test_webrtc_without_relay(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    go2rtc: FakeGo2Rtc,
+    hass_ws_client: Any,
+) -> None:
+    """Without go2rtc's RTSP server, the live view stops with the session."""
+    go2rtc.rtsp = False
+    client = _client(client_holder)
+    ws = await hass_ws_client(hass)
+    await _offer(ws)
+    await _events(ws, 3)
+    stream = f"aiphone_jo_{camera_entry.entry_id}"
+    assert client.lives[0].renew is False
+    assert go2rtc.viewer_streams == [stream]
+    assert [name for name, _ in go2rtc.puts] == [stream]
     client.lives[0].end()
     (error,) = await _events(ws, 1)
-    assert error["type"] == "error"
-    assert error["code"] == "live_ended"
+    assert error == {"type": "error", "code": "live_ended", "message": LIVE_ENDED}
     await until(lambda: client.lives[0].exited.is_set())
     await until(lambda: go2rtc.viewers_open == 0)
 

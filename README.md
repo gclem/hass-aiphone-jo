@@ -70,9 +70,10 @@ another go2rtc server (1.9.15 or later), enter its URL in the options.
 
 - **Live view** (WebRTC, video and sound): opening the camera starts a
   monitoring session on the entrance station. The station ends each session
-  after **about 60 seconds**; the live view then stops and can be opened
-  again. Several viewers share the same session, which also stops when the
-  last viewer closes it.
+  after **about 60 seconds**; while the live view is open, a new session is
+  opened each time and the live view continues after an interruption of a few
+  seconds. Several viewers share the same sessions, which stop a few seconds
+  after the last viewer closes the live view.
 - **Still image**: refreshed only while it is displayed (for example on a
   dashboard card), at most once per refresh interval (30 seconds by default,
   configurable from 10 to 3600 seconds in the options). Otherwise the last
@@ -80,8 +81,24 @@ another go2rtc server (1.9.15 or later), enter its URL in the options.
 
 Each image or live view opens a monitoring session on the entrance station.
 Depending on the installation, this may turn on the monitor screen or the
-station's LED or lighting, and keeps the station briefly busy. The output
-buttons keep working during a live view.
+station's LED or lighting, and keeps the station busy while it lasts. The
+output buttons keep working during a live view.
+
+The integration creates two streams in go2rtc: `aiphone_jo_<entry id>`, which
+receives the sessions, and `aiphone_jo_<entry id>_live`, which the live view
+reads. The second one re-reads the first through go2rtc's RTSP server and
+ffmpeg, without transcoding, so that viewers move to each new session. The
+go2rtc run by Home Assistant provides both. With another go2rtc server:
+
+- keep its `rtsp` module enabled (the default). Its port and credentials do
+  not matter: go2rtc reads the stream from its own RTSP server on the loopback
+  address;
+- make ffmpeg available to go2rtc (included in the official Docker image) and,
+  if `exec.allow_paths` is set, allow `ffmpeg`.
+
+Without the RTSP server, the live view stops with each session (about
+60 seconds) and can be opened again. Without ffmpeg, the live view cannot
+start.
 
 If go2rtc cannot be reached, the camera is unavailable and a repair notice
 explains what to do; the other entities keep working.
@@ -175,8 +192,9 @@ name to delete.
 - **Doorbell detection is experimental.** Ring events may be missed or
   delayed; please report whether they work with your installation.
 - Call answering, two-way audio and output status are not available yet.
-- The live view lasts about 60 seconds per opening; continuous live view is
-  planned. Audio is one-way (from the entrance station).
+- The live view is interrupted for a few seconds about every minute, when the
+  entrance station's session is renewed. Audio is one-way (from the entrance
+  station).
 - The output buttons briefly open a monitoring session on an entrance station;
   the station may show it on its screen.
 - Unregistering the terminal when the integration is removed may not remove

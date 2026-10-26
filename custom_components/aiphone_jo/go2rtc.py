@@ -1,4 +1,11 @@
-"""Bridge between the monitor's live sessions and a go2rtc server."""
+"""Bridge between the monitor's live sessions and a go2rtc server.
+
+Each monitoring session is pushed into one go2rtc stream. go2rtc does not
+move the consumers of a stream to a newly pushed session, so viewers read a
+second stream (the relay) that re-reads the first one through ffmpeg, without
+transcoding. When a session ends, ffmpeg times out, go2rtc restarts it and
+moves the relay's viewers to the next session.
+"""
 
 from __future__ import annotations
 
@@ -35,6 +42,10 @@ GO2RTC_DATA: HassKey[Any] = HassKey("go2rtc")
 # create a stream without a source: this one is refused immediately, so the
 # stream is only fed by the pushed sessions.
 PLACEHOLDER_SOURCE = "rtsp://127.0.0.1:1/aiphone_jo"
+
+# Seconds without media before ffmpeg gives up on an ended session: short, so
+# the relay quickly moves to the next session (go2rtc's default is 5).
+RELAY_TIMEOUT = 2
 
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15)
 FRAME_TIMEOUT = aiohttp.ClientTimeout(total=20)
@@ -91,12 +102,18 @@ async def async_check_server(server: Go2RtcServer) -> None:
 
 
 class Go2RtcBridge:
-    """One go2rtc stream fed by the monitor's live sessions."""
+    """go2rtc stream fed by the monitor's live sessions, and its relay."""
 
     def __init__(self, server: Go2RtcServer, stream: str) -> None:
         """Initialize."""
         self.server = server
         self.stream = stream
+        self.relay = f"{stream}_live"
+        # A stream name as ffmpeg input makes go2rtc read it from its own RTSP
+        # listener on the loopback address, where no RTSP credentials apply.
+        self.relay_source = (
+            f"ffmpeg:{stream}#video=copy#audio=copy#timeout={RELAY_TIMEOUT}"
+        )
 
     def _url(self, path: str, **query: str) -> str:
         params = "&".join(f"{k}={quote(v, safe='')}" for k, v in query.items())
@@ -119,8 +136,7 @@ class Go2RtcBridge:
         except (aiohttp.ClientError, TimeoutError) as err:
             raise Go2RtcError(type(err).__name__) from err
 
-    async def _streams(self) -> dict[str, Any] | None:
-        url = self._url("api/streams", src=self.stream)
+    async def _json(self, url: str) -> dict[str, Any] | None:
         status, body = await self._request("GET", url)
         if status != 200:
             return None
@@ -130,16 +146,35 @@ class Go2RtcBridge:
             return None
         return data if isinstance(data, dict) else None
 
-    async def async_ensure_stream(self) -> None:
-        """Create the target stream if it does not exist yet."""
-        if await self._streams() is not None:
+    async def _streams(self, name: str | None = None) -> dict[str, Any] | None:
+        return await self._json(self._url("api/streams", src=name or self.stream))
+
+    async def _create(self, name: str, source: str) -> None:
+        if await self._streams(name) is not None:
             return
         status, _ = await self._request(
-            "PUT",
-            self._url("api/streams", name=self.stream, src=PLACEHOLDER_SOURCE),
+            "PUT", self._url("api/streams", name=name, src=source)
         )
         if status != 200:
             raise Go2RtcError(f"Cannot create the stream: HTTP {status}")
+
+    async def async_ensure_stream(self) -> None:
+        """Create the target stream if it does not exist yet."""
+        await self._create(self.stream, PLACEHOLDER_SOURCE)
+
+    async def async_relay_supported(self) -> bool:
+        """True when go2rtc can relay the stream (its RTSP server is enabled)."""
+        info = await self._json(self.server.api("api"))
+        if info is None:
+            raise Go2RtcError("No server information")
+        return isinstance(info.get("rtsp"), dict)
+
+    async def async_ensure_relay(self) -> None:
+        """Create the relay stream read by the viewers if it does not exist yet.
+
+        An existing stream is never replaced: its viewers would be orphaned.
+        """
+        await self._create(self.relay, self.relay_source)
 
     async def async_ingest(self, offer: str) -> str:
         """Push the relay's offer into the stream; return the answer for the relay."""
@@ -172,23 +207,27 @@ class Go2RtcBridge:
         except TimeoutError as err:
             raise Go2RtcError("No video received") from err
 
-    async def async_frame(self) -> bytes:
-        """Current JPEG image of the stream."""
+    async def async_frame(self, stream: str | None = None) -> bytes:
+        """Current JPEG image of the stream (the target stream by default)."""
         status, body = await self._request(
-            "GET", self._url("api/frame.jpeg", src=self.stream), limit=FRAME_TIMEOUT
+            "GET",
+            self._url("api/frame.jpeg", src=stream or self.stream),
+            limit=FRAME_TIMEOUT,
         )
         if status != 200 or not body:
             raise Go2RtcError(f"No image: HTTP {status}")
         return body
 
     async def async_open_viewer(
-        self, on_message: Callable[[dict[str, Any]], None]
+        self,
+        on_message: Callable[[dict[str, Any]], None],
+        stream: str | None = None,
     ) -> Go2RtcViewer:
-        """WebSocket WebRTC session of a viewer on the stream."""
+        """WebSocket WebRTC session of a viewer (on the target stream by default)."""
         try:
             async with asyncio.timeout(REQUEST_TIMEOUT.total):
                 socket = await self.server.session.ws_connect(
-                    self._url("api/ws", src=self.stream)
+                    self._url("api/ws", src=stream or self.stream)
                 )
         except (aiohttp.ClientError, TimeoutError) as err:
             raise Go2RtcError(type(err).__name__) from err

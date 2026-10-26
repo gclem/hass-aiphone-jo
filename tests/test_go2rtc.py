@@ -16,6 +16,7 @@ from custom_components.aiphone_jo.const import (
 )
 from custom_components.aiphone_jo.go2rtc import (
     PLACEHOLDER_SOURCE,
+    RELAY_TIMEOUT,
     Go2RtcBridge,
     Go2RtcError,
     Go2RtcServer,
@@ -87,6 +88,43 @@ async def test_ensure_stream(bridge: Go2RtcBridge, go2rtc: FakeGo2Rtc) -> None:
     await bridge.async_ensure_stream()
     assert go2rtc.puts == [("aiphone_jo_test", PLACEHOLDER_SOURCE)]
     assert go2rtc.streams["aiphone_jo_test"] == [PLACEHOLDER_SOURCE]
+
+
+async def test_relay_supported(bridge: Go2RtcBridge, go2rtc: FakeGo2Rtc) -> None:
+    """The relay needs go2rtc's RTSP server, reported by the API."""
+    assert await bridge.async_relay_supported()
+    go2rtc.rtsp = False
+    assert not await bridge.async_relay_supported()
+
+
+async def test_relay_supported_unreachable(
+    hass: HomeAssistant, socket_enabled: None
+) -> None:
+    """An unreachable server is an error, not a missing feature."""
+    server = Go2RtcServer("http://127.0.0.1:9/", aiohttp.ClientSession())
+    try:
+        with pytest.raises(Go2RtcError):
+            await Go2RtcBridge(server, "x").async_relay_supported()
+    finally:
+        await server.session.close()
+
+
+async def test_ensure_relay(bridge: Go2RtcBridge, go2rtc: FakeGo2Rtc) -> None:
+    """The relay re-reads the stream through ffmpeg, created once and never replaced."""
+    await bridge.async_ensure_stream()
+    await bridge.async_ensure_relay()
+    await bridge.async_ensure_relay()
+    source = f"ffmpeg:aiphone_jo_test#video=copy#audio=copy#timeout={RELAY_TIMEOUT}"
+    assert bridge.relay == "aiphone_jo_test_live"
+    assert go2rtc.puts == [
+        ("aiphone_jo_test", PLACEHOLDER_SOURCE),
+        ("aiphone_jo_test_live", source),
+    ]
+    await bridge.async_ingest(JANUS_OFFER)
+    assert await bridge.async_frame(bridge.relay) == JPEG
+    viewer = await bridge.async_open_viewer(lambda _: None, bridge.relay)
+    await until(lambda: go2rtc.viewer_streams == ["aiphone_jo_test_live"])
+    await viewer.async_close()
 
 
 async def test_ingest(bridge: Go2RtcBridge, go2rtc: FakeGo2Rtc) -> None:

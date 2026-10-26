@@ -303,7 +303,14 @@ class FakeLive:
         self.renew = renew
         self.session: object | None = None
         self.answer: str | None = None
+        self.answers: list[str] = []
+        self.error: BaseException | None = None
         self.exited = asyncio.Event()
+
+    @property
+    def running(self) -> bool:
+        """Like LiveMonitor.running: until the context exits or renewal gave up."""
+        return not self.exited.is_set() and self.error is None
 
     async def __aenter__(self) -> FakeLive:
         self.client.lives.append(self)
@@ -311,8 +318,7 @@ class FakeLive:
             await self.client.gate.wait()
         if error := self.client.live_errors.get(self.terminal):
             raise error
-        self.answer = await self.negotiate(JANUS_OFFER)
-        self.session = object()
+        await self.renewed()
         return self
 
     async def __aexit__(self, *exc: object) -> None:
@@ -322,6 +328,17 @@ class FakeLive:
     def end(self) -> None:
         """The entrance station ends the session."""
         self.session = None
+
+    async def renewed(self) -> None:
+        """A (new) session is negotiated."""
+        self.answer = await self.negotiate(JANUS_OFFER)
+        self.answers.append(self.answer)
+        self.session = object()
+
+    def give_up(self, error: BaseException) -> None:
+        """Renewal failed too many times."""
+        self.session = None
+        self.error = error
 
 
 class FakeClient:

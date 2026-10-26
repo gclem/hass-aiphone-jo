@@ -70,11 +70,13 @@ class FakeGo2Rtc:
     puts: list[tuple[str, str]] = field(default_factory=list)
     frames: list[str] = field(default_factory=list)
     viewer_messages: list[dict[str, Any]] = field(default_factory=list)
+    viewer_streams: list[str] = field(default_factory=list)
     viewers_open: int = 0
     viewers_total: int = 0
     ingest_status: int = 201
     frame: bytes = JPEG
     video: bool = True
+    rtsp: bool = True
     pushed: set[str] = field(default_factory=set)
     _server: TestServer | None = None
 
@@ -97,7 +99,18 @@ class FakeGo2Rtc:
             await self._server.close()
 
     async def _api(self, request: web.Request) -> web.Response:
-        return web.json_response({"version": "1.9.15"})
+        info: dict[str, Any] = {"version": "1.9.15"}
+        if self.rtsp:
+            info["rtsp"] = {"listen": "127.0.0.1:18554"}
+        return web.json_response(info)
+
+    def _live(self, name: str) -> bool:
+        """True when the stream, or the stream it relays, received a session."""
+        return name in self.pushed or any(
+            source.startswith(f"ffmpeg:{pushed}#")
+            for pushed in self.pushed
+            for source in self.streams.get(name, [])
+        )
 
     async def _get_streams(self, request: web.Request) -> web.Response:
         name = request.query["src"]
@@ -136,12 +149,13 @@ class FakeGo2Rtc:
     async def _frame(self, request: web.Request) -> web.Response:
         name = request.query["src"]
         self.frames.append(name)
-        body = self.frame if name in self.pushed else b""
+        body = self.frame if self._live(name) else b""
         return web.Response(status=200, body=body, content_type="image/jpeg")
 
     async def _ws(self, request: web.Request) -> web.WebSocketResponse:
         socket = web.WebSocketResponse()
         await socket.prepare(request)
+        self.viewer_streams.append(request.query["src"])
         self.viewers_open += 1
         self.viewers_total += 1
         try:
