@@ -29,8 +29,15 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from webrtc_models import RTCIceCandidateInit
 
 from .api import Station
-from .const import CONF_IMAGE_REFRESH, DEFAULT_IMAGE_REFRESH, DOMAIN
-from .go2rtc import Go2RtcBridge, Go2RtcError, Go2RtcViewer, async_get_server
+from .const import CONF_CALL_TALK, CONF_IMAGE_REFRESH, DEFAULT_IMAGE_REFRESH, DOMAIN
+from .go2rtc import (
+    PLACEHOLDER_SOURCE,
+    Go2RtcBridge,
+    Go2RtcError,
+    Go2RtcViewer,
+    async_get_server,
+)
+from .talk import SendOffer, TalkPath, TalkServer
 from .vendor.aiphone_jo import AiphoneJoError, StationBusyError
 
 if TYPE_CHECKING:
@@ -90,6 +97,9 @@ class CameraMedia:
             self.unavailable_reason = ISSUE_GO2RTC_UNAVAILABLE
         self._live: Any = None
         self._call_session: Any = None
+        self._call_stream: str | None = None
+        self._talk_server: TalkServer | None = None
+        self._talk: TalkPath | None = None
         self._watch: asyncio.Task[None] | None = None
         self._stopper: asyncio.Task[None] | None = None
         self._continuous: bool | None = None
@@ -113,6 +123,8 @@ class CameraMedia:
     @property
     def _viewer_stream(self) -> str | None:
         """Stream read by viewers and live images (None: the session stream)."""
+        if self._call_stream is not None:
+            return self._call_stream
         bridge = self._bridge
         return bridge.relay if bridge is not None and self._continuous else None
 
@@ -279,6 +291,10 @@ class CameraMedia:
         self._users = 0
         self._call_session = None
         await self._async_stop()
+        await self._async_close_call_stream()
+        server, self._talk_server = self._talk_server, None
+        if server is not None:
+            await server.async_stop()
 
     # ------------------------------------------------------------- calls
 
@@ -286,28 +302,66 @@ class CameraMedia:
         """Free the monitoring session for a call; live viewers are told why."""
         await self._async_stop(notice=notice)
 
+    @property
+    def talk_enabled(self) -> bool:
+        """True when talking to the visitor is enabled in the options."""
+        return bool(self._runtime.entry.options.get(CONF_CALL_TALK, False))
+
+    @property
+    def talk(self) -> Callable[[SendOffer], Awaitable[None]] | None:
+        """Talk-path callback for the call being answered, if any."""
+        return self._talk.async_talk if self._talk is not None else None
+
+    async def _async_open_talk(self, bridge: Go2RtcBridge) -> TalkPath | None:
+        try:
+            if self._talk_server is None:
+                server = TalkServer()
+                await server.async_start()
+                self._talk_server = server
+        except OSError as err:
+            _LOGGER.warning("Talking is unavailable: %s", err)
+            return None
+        return TalkPath(self._talk_server, bridge, bridge.call_stream)
+
     async def async_call_negotiator(self) -> Callable[[str], Awaitable[str]]:
-        """Prepare the stream for an answered call; returns its SDP negotiator."""
+        """Create the call stream for an answered call; returns its SDP negotiator."""
         bridge = self._bridge
         if not self.available or bridge is None:
             raise Go2RtcError("Video is unavailable")
-        if self._continuous is None:
-            self._continuous = await bridge.async_relay_supported()
-        await bridge.async_ensure_stream()
-        if self._continuous:
-            await bridge.async_ensure_relay()
-        return bridge.async_ingest
+        await self._async_close_call_stream()
+        sources = [PLACEHOLDER_SOURCE]
+        if self.talk_enabled and (talk := await self._async_open_talk(bridge)):
+            self._talk = talk
+            sources.append(talk.source)
+        stream = bridge.call_stream
+        self._call_stream = stream
+        await bridge.async_create_stream(stream, *sources)
+
+        async def negotiate(offer: str) -> str:
+            return await bridge.async_ingest(offer, stream)
+
+        return negotiate
 
     def async_attach_call(self, session: Any) -> None:
-        """The stream is fed by an answered call instead of a live session."""
+        """The call stream is fed by an answered call."""
         self._call_session = session
 
+    async def _async_close_call_stream(self) -> None:
+        talk, self._talk = self._talk, None
+        if talk is not None:
+            await talk.async_close()
+        stream, self._call_stream = self._call_stream, None
+        bridge = self._bridge
+        if stream is not None and bridge is not None:
+            with contextlib.suppress(Go2RtcError):
+                await bridge.async_delete_stream(stream)
+
     async def async_end_call(self) -> None:
-        """The call ended: disconnect its viewers."""
-        if self._call_session is None:
-            return
-        self._call_session = None
-        await self._async_stop(notice="call_ended")
+        """The call ended (or could not be answered): close its stream."""
+        if self._call_session is not None:
+            self._call_session = None
+            await self._async_stop(notice="call_ended")
+        await self._async_close_call_stream()
 
     # ------------------------------------------------------------ images
 
@@ -322,7 +376,7 @@ class CameraMedia:
             if not self.live and self._fresh():
                 return self._image
             try:
-                if self._live is not None:
+                if self.live:
                     image = await bridge.async_frame(self._viewer_stream)
                 else:
                     await self.async_acquire()

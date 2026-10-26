@@ -98,6 +98,7 @@ class CallController:
         self._session: Any = None
         self._cancel_timeout: Callable[[], None] | None = None
         self._watch: asyncio.Task[None] | None = None
+        self._answering: asyncio.Task[Any] | None = None
 
     @property
     def enabled(self) -> bool:
@@ -166,8 +167,27 @@ class CallController:
             self._set(CallState.CONNECTING)
             try:
                 negotiate = await media.async_call_negotiator()
-                # The library runs the whole sequence and tears it down on failure.
-                session = await client.answer_call(call, negotiate)
+                if self.state is not CallState.CONNECTING:
+                    # Hung up while the call stream was being prepared.
+                    await media.async_end_call()
+                    return
+
+                async def answer() -> Any:
+                    # The library runs the whole sequence and tears it down on
+                    # failure or cancellation (hang-up while connecting).
+                    return await client.answer_call(call, negotiate, talk=media.talk)
+
+                self._answering = asyncio.create_task(answer())
+                try:
+                    session = await self._answering
+                finally:
+                    self._answering = None
+            except asyncio.CancelledError:
+                task = asyncio.current_task()
+                if task is not None and task.cancelling():
+                    raise
+                # Hung up while connecting: _async_finish already cleaned up.
+                return
             except CallAnsweredElsewhereError as err:
                 self.end_reason = str(CallEndReason.ANSWERED_ELSEWHERE)
                 await self._async_finish(CallState.ANSWERED_ELSEWHERE)
@@ -259,6 +279,11 @@ class CallController:
             )
 
     async def _async_finish(self, state: CallState) -> None:
+        answering = self._answering
+        if answering is not None and not answering.done():
+            answering.cancel()
+            with contextlib.suppress(asyncio.CancelledError, AiphoneJoError):
+                await asyncio.wait({answering})
         session, self._session = self._session, None
         if self._cancel_timeout is not None:
             self._cancel_timeout()

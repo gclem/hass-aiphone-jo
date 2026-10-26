@@ -344,6 +344,29 @@ class FakeLive:
         self.error = error
 
 
+# Station's answer to the talk offer (ADD_SND_USER); fictitious values.
+TALK_ANSWER = "\r\n".join(
+    [
+        "v=0",
+        "o=- 4 4 IN IP4 198.51.100.1",
+        "s=-",
+        "t=0 0",
+        "a=group:BUNDLE 2",
+        "m=audio 20004 UDP/TLS/RTP/SAVPF 0",
+        "c=IN IP4 198.51.100.1",
+        "a=mid:2",
+        "a=setup:active",
+        "a=fingerprint:sha-256 44:55:66:77",
+        "a=ice-ufrag:stationufrag",
+        "a=ice-pwd:stationpassword",
+        "a=rtpmap:0 PCMU/8000",
+        "a=recvonly",
+        "a=candidate:5 1 udp 2015363327 198.51.100.1 20004 typ host",
+        "",
+    ]
+)
+
+
 class FakeCallSession:
     """Stand-in for CallSession: records the answering steps."""
 
@@ -354,6 +377,7 @@ class FakeCallSession:
         self.steps: list[str] = []
         self.answer: str | None = None
         self.first_answer = False
+        self.talk_offer: str | None = None
 
     def _step(self, name: str) -> None:
         self.steps.append(name)
@@ -370,6 +394,11 @@ class FakeCallSession:
 
     async def ready(self) -> None:
         self._step("ready")
+
+    async def add_send_audio(self, offer: str) -> str:
+        self._step("add_send_audio")
+        self.talk_offer = offer
+        return TALK_ANSWER
 
     async def reply(self) -> None:
         self._step("reply")
@@ -446,6 +475,8 @@ class FakeClient:
             offer = await session.request_offer()
             await session.send_answer(await negotiate(offer))
             await session.ready()
+            if talk is not None:
+                await talk(session.add_send_audio)
             await session.reply()
             if not await session.start():
                 raise CommandRejectedError(

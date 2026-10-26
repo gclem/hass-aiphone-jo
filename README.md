@@ -115,12 +115,28 @@ Disabled by default. When enabled in the options, the integration adds:
 | `sensor` | Call | `idle`, `ringing`, `connecting`, `talking`, `ended`, `rejected`, `missed`, `answered_elsewhere` or `failed`, with the `station`, `started_at` and `end_reason` (`answered_elsewhere`, `ended_by_station`, `cancelled_by_station`, `expired`, `rejected` or `ended_by_client`). |
 
 After **Answer**, open the camera: the live view shows the visitor with sound.
-Talking back to the visitor is not available yet. A call is hung up
-automatically after 200 seconds (the limit of the official app), and when
-the integration is reloaded. If another phone answers first, the call shows
-`answered_elsewhere`. The
-output buttons keep working during a call. Call answering needs the camera
-(go2rtc).
+A call is hung up automatically after 200 seconds (the limit of the official
+app), and when the integration is reloaded. If another phone answers first,
+the call shows `answered_elsewhere`. The output buttons keep working during a
+call. Call answering needs the camera (go2rtc).
+
+#### Talking to the visitor (experimental)
+
+With the **Talk to the visitor** option (disabled by default), the integration
+also opens the audio path towards the entrance station when you answer, and
+the camera offers the microphone in its live view. Requirements:
+
+- a Home Assistant version with two-way audio for cameras, with that preview
+  feature enabled in **Settings → System → Labs**;
+- the go2rtc server run by Home Assistant (Home Assistant OS or Container). A
+  go2rtc server on another host, set in the options, cannot reach the
+  integration's local audio endpoint;
+- microphone access in the browser or app, which requires HTTPS outside the
+  local network.
+
+Answer the call, open the camera, then turn the microphone on in the live
+view. If the audio path cannot be opened, the call goes on without it and a
+warning is logged.
 
 This feature is **experimental**: it follows the official app's behaviour but
 has not been validated on real hardware yet. Please report how it behaves with
@@ -190,7 +206,8 @@ Every error message says what to do. The most common cases:
 - the camera image refresh interval (30 seconds by default, 10 to 3600);
 - the URL of a go2rtc server, with optional credentials, when Home Assistant
   does not run go2rtc itself (Home Assistant Core installations);
-- call answering (experimental, disabled by default).
+- call answering, and talking to the visitor (both experimental, disabled by
+  default).
 
 Changes apply immediately, without restarting Home Assistant.
 
@@ -215,8 +232,8 @@ name to delete.
 
 - **Doorbell detection is experimental.** Ring events may be missed or
   delayed; please report whether they work with your installation.
-- Call answering is experimental and one-way: you see and hear the visitor,
-  but cannot talk back yet. Output status is not available yet.
+- Call answering and talking to the visitor are experimental and have not
+  been validated on real hardware yet. Output status is not available yet.
 - The live view is interrupted for a few seconds about every minute, when the
   entrance station's session is renewed. Audio is one-way (from the entrance
   station).

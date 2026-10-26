@@ -44,6 +44,7 @@ from .api import (
 )
 from .const import (
     CONF_CALL_ANSWERING,
+    CONF_CALL_TALK,
     CONF_CREDENTIALS,
     CONF_FINGERPRINT,
     CONF_GO2RTC_PASSWORD,
@@ -585,9 +586,8 @@ class AiphoneJoOptionsFlow(OptionsFlow):
             }
             if CONF_STATION in user_input:
                 options[CONF_STATION] = int(user_input[CONF_STATION])
-            options[CONF_CALL_ANSWERING] = bool(
-                user_input.get(CONF_CALL_ANSWERING, False)
-            )
+            for key in (CONF_CALL_ANSWERING, CONF_CALL_TALK):
+                options[key] = bool(user_input.get(key, False))
             if url := str(user_input.get(CONF_GO2RTC_URL) or "").strip():
                 options[CONF_GO2RTC_URL] = url
                 for key in (CONF_GO2RTC_USERNAME, CONF_GO2RTC_PASSWORD):
@@ -629,12 +629,10 @@ class AiphoneJoOptionsFlow(OptionsFlow):
                 unit_of_measurement="s",
             )
         )
-        schema[
-            vol.Required(
-                CONF_CALL_ANSWERING,
-                default=bool(current.get(CONF_CALL_ANSWERING, False)),
+        for key in (CONF_CALL_ANSWERING, CONF_CALL_TALK):
+            schema[vol.Required(key, default=bool(current.get(key, False)))] = (
+                BooleanSelector()
             )
-        ] = BooleanSelector()
         for key, selector in (
             (
                 CONF_GO2RTC_URL,

@@ -147,7 +147,9 @@ async def test_ring_then_answer_and_hang_up(
     assert session.steps == SEQUENCE
     assert session.answer is not None
     assert "a=mid:audio" in session.answer
-    assert [name for name, _ in go2rtc.ingests] == [f"aiphone_jo_{call_entry.entry_id}"]
+    assert [name for name, _ in go2rtc.ingests] == [
+        f"aiphone_jo_{call_entry.entry_id}_call"
+    ]
     state = hass.states.get(CALL)
     assert state.state == "talking"
     assert state.attributes["station"] == "Front"

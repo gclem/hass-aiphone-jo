@@ -12,8 +12,14 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from webrtc_models import RTCIceCandidateInit
 
 from . import AiphoneJoConfigEntry
+from .const import CONF_CALL_ANSWERING, CONF_CALL_TALK
 from .coordinator import AiphoneJoRuntime
 from .entity import AiphoneJoEntity
+
+try:
+    from homeassistant.components.camera import CameraEntityCapabilities
+except ImportError:  # Home Assistant without two-way audio.
+    CameraEntityCapabilities = None
 
 
 async def async_setup_entry(
@@ -37,6 +43,16 @@ class AiphoneJoCamera(AiphoneJoEntity, Camera):
         AiphoneJoEntity.__init__(self, runtime, "camera")
         Camera.__init__(self)
         self.content_type = "image/jpeg"
+        options = runtime.entry.options
+        if (
+            CameraEntityCapabilities is not None
+            and options.get(CONF_CALL_ANSWERING)
+            and options.get(CONF_CALL_TALK)
+        ):
+            # The frontend then offers the microphone in the live view.
+            self._attr_camera_entity_capabilities = CameraEntityCapabilities(
+                two_way_audio=True
+            )
 
     @property
     def available(self) -> bool:

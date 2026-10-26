@@ -25,6 +25,7 @@ from custom_components.aiphone_jo.go2rtc import (
     Go2RtcBridge,
     Go2RtcServer,
 )
+from custom_components.aiphone_jo.talk import TalkPath, TalkServer
 
 aiortc = pytest.importorskip("aiortc")
 from aiortc import RTCPeerConnection, RTCRtpSender, RTCSessionDescription  # noqa: E402
@@ -64,17 +65,19 @@ async def _gathered(pc: RTCPeerConnection) -> str:
         await asyncio.sleep(0.05)
 
 
-async def _relay(bridge: Go2RtcBridge) -> RTCPeerConnection:
+async def _relay(
+    bridge: Go2RtcBridge, stream: str | None = None, audio_direction: str = "sendonly"
+) -> RTCPeerConnection:
     """Push a session into the stream like the relay does."""
     pc = RTCPeerConnection()
-    audio = pc.addTransceiver(AudioStreamTrack(), direction="sendonly")
+    audio = pc.addTransceiver(AudioStreamTrack(), direction=audio_direction)
     video = pc.addTransceiver(VideoStreamTrack(), direction="sendonly")
     audio.setCodecPreferences(_codecs("audio", "audio/PCMU"))
     video.setCodecPreferences(_codecs("video", "video/H264"))
     offer = _as_relay_offer(await _gathered(pc))
     assert "a=mid:audio" in offer
     assert "sdes:mid" in offer
-    answer = await bridge.async_ingest(offer)
+    answer = await bridge.async_ingest(offer, stream)
     assert "a=mid:audio" in answer
     assert "a=inactive" not in answer
     await pc.setRemoteDescription(
@@ -85,12 +88,20 @@ async def _relay(bridge: Go2RtcBridge) -> RTCPeerConnection:
 
 @asynccontextmanager
 async def _viewer(
-    bridge: Go2RtcBridge, stream: str | None = None
+    bridge: Go2RtcBridge, stream: str | None = None, microphone: bool = False
 ) -> AsyncIterator[dict[str, list[float]]]:
-    """Viewer connected through the WebSocket API; yields frame arrival times."""
+    """Viewer connected through the WebSocket API; yields frame arrival times.
+
+    With ``microphone``, the peer is set up like Home Assistant's frontend
+    with two-way audio: a sendrecv audio transceiver, then video.
+    """
     pc = RTCPeerConnection()
-    pc.addTransceiver("video", direction="recvonly")
-    pc.addTransceiver("audio", direction="recvonly")
+    if microphone:
+        pc.addTransceiver(AudioStreamTrack(), direction="sendrecv")
+        pc.addTransceiver("video", direction="recvonly")
+    else:
+        pc.addTransceiver("video", direction="recvonly")
+        pc.addTransceiver("audio", direction="recvonly")
     received: dict[str, list[float]] = {"video": [], "audio": []}
     readers: list[asyncio.Future[None]] = []
     answered: asyncio.Future[str] = asyncio.get_running_loop().create_future()
@@ -215,3 +226,74 @@ async def test_relay_keeps_viewers_across_sessions(bridge: Go2RtcBridge) -> None
         print(f"longest video gap across the renewal: {gap:.1f} s")
     finally:
         await relay.close()
+
+
+async def _received_audio(bridge: Go2RtcBridge, stream: str) -> int:
+    """Audio packets received by the stream's pushed producers."""
+    info = await bridge._streams(stream)
+    return sum(
+        receiver.get("packets") or 0
+        for producer in (info or {}).get("producers") or []
+        for receiver in producer.get("receivers") or []
+        if (receiver.get("codec") or {}).get("codec_type") == "audio"
+    )
+
+
+async def test_talk_path_through_go2rtc(bridge: Go2RtcBridge) -> None:
+    """The browser's microphone reaches the station through the talk path.
+
+    go2rtc plays the station's side of the talk path: the section sent to the
+    station is pushed into another stream, whose answer is returned.
+    """
+    station = f"{bridge.stream}_station"
+    server = TalkServer()
+    await server.async_start()
+    talk = TalkPath(server, bridge, bridge.call_stream)
+    offers: list[str] = []
+
+    async def send_offer(offer: str) -> str:
+        offers.append(offer)
+        status, body = await bridge._request(
+            "POST", bridge._url("api/webrtc", dst=station), data=offer
+        )
+        assert status == 201, body
+        return body.decode()
+
+    await bridge.async_create_stream(station, PLACEHOLDER_SOURCE)
+    await bridge.async_create_stream(
+        bridge.call_stream, PLACEHOLDER_SOURCE, talk.source
+    )
+    # A call session offers its audio sendrecv.
+    call = await _relay(bridge, bridge.call_stream, audio_direction="sendrecv")
+    try:
+        await bridge.async_wait_video(15, stream=bridge.call_stream)
+        await talk.async_talk(send_offer)
+        [offer] = offers
+        assert offer.count("m=") == 1
+        assert "a=sendonly" in offer
+        assert "PCMU/8000" in offer
+        assert "opus" not in offer
+        assert "a=candidate:" in offer
+        async with asyncio.timeout(15):
+            while True:
+                if talk.connected:
+                    break
+                await asyncio.sleep(0.2)
+
+        async with _viewer(bridge, bridge.call_stream, microphone=True) as received:
+            async with asyncio.timeout(15):
+                while True:
+                    if await _received_audio(bridge, station) >= 50:
+                        break
+                    await asyncio.sleep(0.2)
+            await asyncio.sleep(1)
+            # The viewer still sees and hears the call.
+            assert received["video"]
+            assert received["audio"]
+        assert len(offers) == 1
+    finally:
+        await call.close()
+        await talk.async_close()
+        await server.async_stop()
+        for name in (bridge.call_stream, station):
+            await bridge.async_delete_stream(name)

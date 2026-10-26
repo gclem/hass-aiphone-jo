@@ -5,6 +5,9 @@ move the consumers of a stream to a newly pushed session, so viewers read a
 second stream (the relay) that re-reads the first one through ffmpeg, without
 transcoding. When a session ends, ffmpeg times out, go2rtc restarts it and
 moves the relay's viewers to the next session.
+
+An answered call is pushed into its own stream, which can also carry the talk
+path (see :mod:`.talk`).
 """
 
 from __future__ import annotations
@@ -109,14 +112,19 @@ class Go2RtcBridge:
         self.server = server
         self.stream = stream
         self.relay = f"{stream}_live"
+        self.call_stream = f"{stream}_call"
         # A stream name as ffmpeg input makes go2rtc read it from its own RTSP
         # listener on the loopback address, where no RTSP credentials apply.
         self.relay_source = (
             f"ffmpeg:{stream}#video=copy#audio=copy#timeout={RELAY_TIMEOUT}"
         )
 
-    def _url(self, path: str, **query: str) -> str:
-        params = "&".join(f"{k}={quote(v, safe='')}" for k, v in query.items())
+    def _url(self, path: str, **query: str | list[str]) -> str:
+        params = "&".join(
+            f"{key}={quote(value, safe='')}"
+            for key, values in query.items()
+            for value in ([values] if isinstance(values, str) else values)
+        )
         return self.server.api(f"{path}?{params}")
 
     async def _request(
@@ -158,6 +166,35 @@ class Go2RtcBridge:
         if status != 200:
             raise Go2RtcError(f"Cannot create the stream: HTTP {status}")
 
+    async def async_create_stream(self, name: str, *sources: str) -> None:
+        """Create the stream, or replace its sources."""
+        status, _ = await self._request(
+            "PUT", self._url("api/streams", name=name, src=list(sources))
+        )
+        # go2rtc reports an error when it cannot save its configuration file,
+        # after creating the stream.
+        if status != 200 and await self._streams(name) is None:
+            raise Go2RtcError(f"Cannot create the stream: HTTP {status}")
+
+    async def async_delete_stream(self, name: str) -> None:
+        """Remove a stream."""
+        await self._request("DELETE", self._url("api/streams", src=name))
+
+    async def async_preload(self, name: str, *, microphone: str) -> None:
+        """Keep a consumer sending microphone audio on the stream.
+
+        go2rtc answers once the stream's audio destination is connected.
+        """
+        status, body = await self._request(
+            "PUT", self._url("api/preload", src=name, microphone=microphone)
+        )
+        if status != 200:
+            raise Go2RtcError(f"Preload refused: HTTP {status} {body[:200]!r}")
+
+    async def async_delete_preload(self, name: str) -> None:
+        """Remove the stream's preload consumer."""
+        await self._request("DELETE", self._url("api/preload", src=name))
+
     async def async_ensure_stream(self) -> None:
         """Create the target stream if it does not exist yet."""
         await self._create(self.stream, PLACEHOLDER_SOURCE)
@@ -176,19 +213,19 @@ class Go2RtcBridge:
         """
         await self._create(self.relay, self.relay_source)
 
-    async def async_ingest(self, offer: str) -> str:
+    async def async_ingest(self, offer: str, stream: str | None = None) -> str:
         """Push the relay's offer into the stream; return the answer for the relay."""
         normalized, restore = normalize_mids(offer)
         status, body = await self._request(
-            "POST", self._url("api/webrtc", dst=self.stream), data=normalized
+            "POST", self._url("api/webrtc", dst=stream or self.stream), data=normalized
         )
         if status not in (200, 201):
             raise Go2RtcError(f"Ingest refused: HTTP {status}")
         return restore(body.decode())
 
-    async def async_video_flowing(self) -> bool:
+    async def async_video_flowing(self, stream: str | None = None) -> bool:
         """True once go2rtc receives video from a pushed session."""
-        info = await self._streams()
+        info = await self._streams(stream)
         for producer in (info or {}).get("producers") or []:
             for receiver in producer.get("receivers") or []:
                 codec = receiver.get("codec") or {}
@@ -196,12 +233,14 @@ class Go2RtcBridge:
                     return True
         return False
 
-    async def async_wait_video(self, limit: float, interval: float = 0.25) -> None:
+    async def async_wait_video(
+        self, limit: float, interval: float = 0.25, stream: str | None = None
+    ) -> None:
         """Wait until video flows; raise Go2RtcError after ``limit`` seconds."""
         try:
             async with asyncio.timeout(limit):
                 while True:
-                    if await self.async_video_flowing():
+                    if await self.async_video_flowing(stream):
                         return
                     await asyncio.sleep(interval)
         except TimeoutError as err:

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass, field
 from typing import Any
 
+import aiohttp
 from aiohttp import WSMsgType, web
 from aiohttp.test_utils import TestServer
 
@@ -56,6 +58,53 @@ GO2RTC_ANSWER = "\r\n".join(
     ]
 )
 
+# Offer of go2rtc's WebRTC client (talk source): video and audio to receive,
+# and the microphone to send; candidates are trickled. Fictitious values.
+TALK_OFFER = "\r\n".join(
+    [
+        "v=0",
+        "o=- 3 3 IN IP4 0.0.0.0",
+        "s=-",
+        "t=0 0",
+        "a=fingerprint:sha-256 00:11:22:33",
+        "a=group:BUNDLE 0 1 2",
+        "m=video 9 UDP/TLS/RTP/SAVPF 96 97",
+        "c=IN IP4 0.0.0.0",
+        "a=setup:actpass",
+        "a=mid:0",
+        "a=ice-ufrag:go2rtcufrag",
+        "a=ice-pwd:go2rtcpassword",
+        "a=rtpmap:96 H264/90000",
+        "a=rtpmap:97 VP8/90000",
+        "a=recvonly",
+        "m=audio 9 UDP/TLS/RTP/SAVPF 101 0 8",
+        "c=IN IP4 0.0.0.0",
+        "a=setup:actpass",
+        "a=mid:1",
+        "a=ice-ufrag:go2rtcufrag",
+        "a=ice-pwd:go2rtcpassword",
+        "a=rtpmap:101 opus/48000/2",
+        "a=rtpmap:0 PCMU/8000",
+        "a=rtpmap:8 PCMA/8000",
+        "a=recvonly",
+        "m=audio 9 UDP/TLS/RTP/SAVPF 101 0 8",
+        "c=IN IP4 0.0.0.0",
+        "a=setup:actpass",
+        "a=mid:2",
+        "a=ice-ufrag:go2rtcufrag",
+        "a=ice-pwd:go2rtcpassword",
+        "a=rtpmap:101 opus/48000/2",
+        "a=fmtp:101 minptime=10;useinbandfec=1",
+        "a=rtcp-fb:101 transport-cc",
+        "a=rtpmap:0 PCMU/8000",
+        "a=rtcp-fb:0 transport-cc",
+        "a=rtpmap:8 PCMA/8000",
+        "a=sendonly",
+        "",
+    ]
+)
+TALK_CANDIDATE = "candidate:4 1 udp 2130706431 192.0.2.20 50004 typ host"
+
 VIEWER_ANSWER = "v=0\r\ns=viewer-answer\r\n"
 VIEWER_CANDIDATE = "candidate:3 1 udp 2130706431 192.0.2.20 50002 typ host"
 JPEG = b"\xff\xd8fake-jpeg\xff\xd9"
@@ -78,6 +127,11 @@ class FakeGo2Rtc:
     video: bool = True
     rtsp: bool = True
     pushed: set[str] = field(default_factory=set)
+    deleted: list[str] = field(default_factory=list)
+    preloads: list[tuple[str, str]] = field(default_factory=list)
+    preloads_deleted: list[str] = field(default_factory=list)
+    talk_answers: list[str] = field(default_factory=list)
+    talk_dial: bool = True
     _server: TestServer | None = None
 
     async def start(self) -> str:
@@ -86,6 +140,9 @@ class FakeGo2Rtc:
         app.router.add_get("/api", self._api)
         app.router.add_get("/api/streams", self._get_streams)
         app.router.add_put("/api/streams", self._put_streams)
+        app.router.add_delete("/api/streams", self._delete_streams)
+        app.router.add_put("/api/preload", self._put_preload)
+        app.router.add_delete("/api/preload", self._delete_preload)
         app.router.add_post("/api/webrtc", self._webrtc)
         app.router.add_get("/api/frame.jpeg", self._frame)
         app.router.add_get("/api/ws", self._ws)
@@ -127,10 +184,57 @@ class FakeGo2Rtc:
         return web.json_response({"producers": producers})
 
     async def _put_streams(self, request: web.Request) -> web.Response:
-        name, src = request.query["name"], request.query.get("src", "")
-        self.puts.append((name, src))
-        if src:
-            self.streams[name] = [src]
+        name, sources = request.query["name"], request.query.getall("src", [])
+        self.puts.append((name, sources[0] if sources else ""))
+        if any(sources):
+            self.streams[name] = [source for source in sources if source]
+        return web.Response(status=200)
+
+    async def _delete_streams(self, request: web.Request) -> web.Response:
+        name = request.query["src"]
+        self.deleted.append(name)
+        self.streams.pop(name, None)
+        self.pushed.discard(name)
+        return web.Response(status=200)
+
+    async def _put_preload(self, request: web.Request) -> web.Response:
+        """Like go2rtc: a microphone consumer makes it dial the talk source."""
+        name = request.query["src"]
+        self.preloads.append((name, request.query.get("microphone", "")))
+        talk = next(
+            (
+                source.removeprefix("webrtc:")
+                for source in self.streams.get(name, [])
+                if source.startswith("webrtc:ws://")
+            ),
+            None,
+        )
+        if talk is None or not self.talk_dial:
+            return web.Response(status=500, text="streams: no producer")
+        try:
+            async with (
+                aiohttp.ClientSession() as session,
+                session.ws_connect(talk) as socket,
+            ):
+                await socket.send_json({"type": "webrtc/offer", "value": TALK_OFFER})
+                await socket.send_json(
+                    {"type": "webrtc/candidate", "value": TALK_CANDIDATE}
+                )
+                async with asyncio.timeout(5):
+                    message = await socket.receive()
+        except (aiohttp.ClientError, TimeoutError) as err:
+            return web.Response(status=500, text=type(err).__name__)
+        if message.type is not WSMsgType.TEXT:
+            return web.Response(status=500, text="webrtc: no answer")
+        data = json.loads(message.data)
+        if data.get("type") != "webrtc/answer":
+            return web.Response(status=500, text="wrong answer")
+        self.talk_answers.append(data["value"])
+        return web.Response(status=200)
+
+    async def _delete_preload(self, request: web.Request) -> web.Response:
+        name = request.query["src"]
+        self.preloads_deleted.append(name)
         return web.Response(status=200)
 
     async def _webrtc(self, request: web.Request) -> web.Response:

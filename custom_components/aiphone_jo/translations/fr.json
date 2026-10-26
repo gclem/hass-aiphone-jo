@@ -115,12 +115,14 @@
           "go2rtc_url": "URL de go2rtc (facultatif)",
           "go2rtc_username": "Utilisateur go2rtc (facultatif)",
           "go2rtc_password": "Mot de passe go2rtc (facultatif)",
-          "call_answering": "Décroché des appels (expérimental)"
+          "call_answering": "Décroché des appels (expérimental)",
+          "call_talk": "Parler au visiteur (expérimental)"
         },
         "data_description": {
           "image_refresh_interval": "Délai minimal entre deux images de la caméra (10 à 3600 secondes). L'image n'est rafraîchie que lorsqu'elle est affichée, et chaque rafraîchissement ouvre une session de surveillance sur la platine de rue.",
           "go2rtc_url": "Laissez vide pour utiliser le serveur go2rtc lancé par Home Assistant (Home Assistant OS et Container). Renseignez-la pour une installation Home Assistant Core ou un go2rtc externe, par exemple http://192.0.2.10:1984.",
-          "call_answering": "Ajoute les boutons Décrocher, Raccrocher et Refuser ainsi qu'un capteur d'état d'appel. Quand vous décrochez, le live de la caméra montre le visiteur et diffuse son son ; vous ne pouvez pas encore lui parler. Expérimental : pas encore validé sur le matériel réel. Un appel est raccroché automatiquement au bout de 200 secondes, comme dans l'application officielle."
+          "call_answering": "Ajoute les boutons Décrocher, Raccrocher et Refuser ainsi qu'un capteur d'état d'appel. Quand vous décrochez, le live de la caméra montre le visiteur et diffuse son son ; pour lui parler, activez aussi l'option suivante. Expérimental : pas encore validé sur le matériel réel. Un appel est raccroché automatiquement au bout de 200 secondes, comme dans l'application officielle.",
+          "call_talk": "Avec le décroché des appels, permet de parler au visiteur depuis le live de la caméra, grâce à l'audio bidirectionnel de Home Assistant (une fonctionnalité en avant-première des versions récentes). Nécessite le serveur go2rtc lancé par Home Assistant. Expérimental : pas encore validé sur le matériel réel ; désactivez-le si le décroché échoue."
         }
       }
     },

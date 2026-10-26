@@ -6,9 +6,13 @@ All notable changes to this integration.
 
 - Experimental call answering, disabled by default: Answer, Hang up and Reject
   buttons and a Call state sensor. An answered call shows the visitor with
-  sound in the camera live view; talking back is not available yet. Calls are
-  hung up automatically after 200 seconds. The sensor tells why a call ended,
+  sound in the camera live view. Calls are hung up automatically after 200
+  seconds. The sensor tells why a call ended,
   including when another phone answered first.
+- Experimental talking to the visitor, disabled by default (option "Talk to
+  the visitor"): when a call is answered, the camera live view offers the
+  microphone with Home Assistant's two-way audio preview feature. Needs the
+  go2rtc server run by Home Assistant.
 
 ## 0.4.0
 
