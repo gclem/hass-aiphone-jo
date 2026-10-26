@@ -309,3 +309,15 @@ class StationBusyError(CommandRejectedError):
 
 class SessionError(AiphoneJoError):
     """Monitoring or call session missing, closed or already open."""
+
+
+class MediaError(AiphoneJoError):
+    """Error of the optional video support (:mod:`aiphone_jo.media`)."""
+
+
+class MediaUnavailableError(MediaError):
+    """The ``media`` extra is not installed (``pip install aiphone-jo[media]``)."""
+
+
+class MediaTimeoutError(MediaError, TimeoutError):
+    """No video frame was received in time."""

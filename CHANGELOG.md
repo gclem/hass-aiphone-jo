@@ -2,13 +2,14 @@
 
 All notable changes to this integration.
 
-## Unreleased
+## 0.3.0
 
 - New camera entity, through go2rtc: WebRTC live view with sound (about one
   minute per opening), and a still image of the chosen entrance station,
   refreshed only while displayed (interval configurable in the options,
   30 seconds by default). A go2rtc URL can be set in the options for Home
   Assistant Core installations.
+- Update the aiphone-jo library to 0.3.0.
 
 ## 0.2.2
 

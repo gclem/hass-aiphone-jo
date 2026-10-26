@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib
 import logging
 import warnings
 from collections import defaultdict
@@ -24,7 +25,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from types import TracebackType
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import aiohttp
 
@@ -46,12 +47,14 @@ from .exceptions import (
     CommandRejectedError,
     InvalidCredentialsError,
     InvalidInputError,
+    MediaUnavailableError,
     NotConnectedError,
     ResponseTimeoutError,
     SessionError,
     StationBusyError,
 )
 from .frames import Message, body, header, parse_frame
+from .live import LiveMonitor, Negotiator, SessionEndCallback
 from .messages import (
     CallSignal,
     OutboundMessage,
@@ -84,6 +87,9 @@ from .models import (
 from .redact import redact
 from .transport import MqttConnection, MqttConnectOptions, TransportFactory, aiomqtt_connect
 
+if TYPE_CHECKING:
+    from .media import VideoStream
+
 _LOGGER = logging.getLogger(__name__)
 _RELAY_OK = frozenset({0, 200})
 _SIGNAL_OK = frozenset({0, 200})
@@ -102,6 +108,15 @@ class _Waiter:
 
 def _rslt(message: Message) -> Any:
     return header(message).get("RSLT")
+
+
+def _load_media() -> Any:
+    try:
+        return importlib.import_module("aiphone_jo.media")
+    except ImportError as err:
+        raise MediaUnavailableError(
+            "Video support requires the media extra: pip install 'aiphone-jo[media]'."
+        ) from err
 
 
 def _resolve_output(output: Output | str | int, gate: Output | None) -> Output:
@@ -368,6 +383,7 @@ class AiphoneJoClient:
         reply_timeout: float = MQTT_REPLY_TIMEOUT,
         ring_timeout: float = CALL_RING_TIMEOUT,
         reconnect_delays: tuple[float, ...] = RECONNECT_DELAYS,
+        camera_terminal: Terminal | int | None = None,
     ) -> None:
         if not credentials.send_topic:
             raise InvalidCredentialsError("send_topic is required to send commands.")
@@ -392,6 +408,9 @@ class AiphoneJoClient:
         self._background: set[asyncio.Task[Any]] = set()
         self._broadcast_subscribed = False
         self._auth_failed = False
+        self.camera_terminal = camera_terminal
+        self._camera_candidates: tuple[Terminal, ...] | None = None
+        self._video_streams: list[Any] = []
 
     # ------------------------------------------------------------------ state
 
@@ -664,6 +683,78 @@ class AiphoneJoClient:
     ) -> MonitorSession:
         """Same as :meth:`monitor` without a context manager; call ``close()`` afterwards."""
         return await self.monitor(terminal, term_kind).__aenter__()
+
+    async def start_camera_session(
+        self, terminal: Terminal | int | None = None, term_kind: int = TERM_KIND_ENTRANCE_STATION
+    ) -> MonitorSession:
+        """Open a monitoring session on ``terminal``, :attr:`camera_terminal`, or the first
+        camera station of ``/getRoomInfo`` that is not busy.
+
+        Raises :class:`StationBusyError` when every candidate answered 486 and
+        :class:`InvalidInputError` when no station is known.
+        """
+        if terminal is not None:
+            return await self.start_monitor(terminal, term_kind)
+        if self.camera_terminal is not None:
+            return await self.start_monitor(self.camera_terminal, term_kind)
+        if self._camera_candidates is None:
+            if self._http is None:
+                raise InvalidInputError(
+                    "No camera station: pass a terminal, set camera_terminal, "
+                    "or give the client an aiohttp session for /getRoomInfo."
+                )
+            self._camera_candidates = (await self.get_room_info()).camera_terminals
+        if not self._camera_candidates:
+            raise InvalidInputError("/getRoomInfo lists no camera entrance station.")
+        busy: StationBusyError | None = None
+        for candidate in self._camera_candidates:
+            try:
+                return await self.start_monitor(candidate)
+            except StationBusyError as err:
+                busy = err
+        if busy is None:
+            raise InvalidInputError("No camera entrance station could be monitored.")
+        raise busy
+
+    def live_monitor(
+        self,
+        negotiate: Negotiator,
+        terminal: Terminal | int | None = None,
+        *,
+        on_session_end: SessionEndCallback | None = None,
+        renew: bool = True,
+    ) -> LiveMonitor:
+        """Monitoring with media negotiation, renewed automatically (see :class:`LiveMonitor`).
+
+        ``negotiate(offer_sdp) -> answer_sdp`` is awaited for every new
+        session; no media library is required by the core.
+        """
+        return LiveMonitor(self, negotiate, terminal, on_session_end=on_session_end, renew=renew)
+
+    async def snapshot(
+        self, terminal: Terminal | int | None = None, *, timeout: float = 15.0
+    ) -> bytes:
+        """JPEG image of the entrance station camera (requires the ``media`` extra).
+
+        Reuses the latest frame of an active :meth:`video_stream`; otherwise
+        opens a monitoring session, decodes the first complete video frame and
+        always closes the session (30031 then 23003). Raises
+        :class:`MediaUnavailableError`, :class:`MediaTimeoutError` or
+        :class:`StationBusyError`.
+        """
+        media = _load_media()
+        image: bytes = await media.snapshot(self, terminal, timeout=timeout)
+        return image
+
+    def video_stream(self, terminal: Terminal | int | None = None) -> VideoStream:
+        """Live video of the entrance station (requires the ``media`` extra).
+
+        Use as ``async with client.video_stream() as stream:``; see
+        :class:`aiphone_jo.media.VideoStream`.
+        """
+        media = _load_media()
+        stream: VideoStream = media.VideoStream(self, terminal)
+        return stream
 
     async def _open_monitor(self, term_id: int, term_kind: int) -> MonitorSession:
         await self._session_lock.acquire()

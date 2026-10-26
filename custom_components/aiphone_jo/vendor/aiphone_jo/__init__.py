@@ -34,6 +34,9 @@ from .exceptions import (
     IncompatibleVersionError,
     InvalidCredentialsError,
     InvalidInputError,
+    MediaError,
+    MediaTimeoutError,
+    MediaUnavailableError,
     NoMonitorFoundError,
     NotConnectedError,
     PairingCloudError,
@@ -50,6 +53,7 @@ from .exceptions import (
     UntrustedPeerError,
     pairing_reason,
 )
+from .live import LiveMonitor, Negotiator, SessionEndCallback
 from .models import (
     AiphoneEvent,
     CallStatus,
@@ -68,7 +72,7 @@ from .models import (
 from .pairing import LocalLink, PairingFlow, PairingStep, PeerCertificate, inspect_peer
 from .redact import redact
 
-__version__ = "0.2.2"
+__version__ = "0.3.0"
 
 __all__ = [
     "APP_CODE_INCOMPATIBLE",
@@ -99,11 +103,16 @@ __all__ = [
     "InvalidCredentialsError",
     "InvalidInputError",
     "KeyInfo",
+    "LiveMonitor",
     "LocalLink",
     "LockStatus",
+    "MediaError",
+    "MediaTimeoutError",
+    "MediaUnavailableError",
     "MessageEvent",
     "Mid",
     "MonitorSession",
+    "Negotiator",
     "NoMonitorFoundError",
     "NotConnectedError",
     "Output",
@@ -122,6 +131,7 @@ __all__ = [
     "ResponseTimeoutError",
     "RingEvent",
     "RoomInfo",
+    "SessionEndCallback",
     "SessionEndedBy",
     "SessionEndedEvent",
     "SessionError",
