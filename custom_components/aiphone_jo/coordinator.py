@@ -13,6 +13,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .api import Station
+from .call import CallController
 from .const import CONF_STATION, DOMAIN
 from .media import CameraMedia
 from .names import StationNamer
@@ -20,6 +21,7 @@ from .vendor.aiphone_jo import (
     AiphoneEvent,
     AiphoneJoClient,
     AiphoneJoError,
+    CallStatus,
     CallUpdatedEvent,
     CommandRejectedError,
     ConnectionStateEvent,
@@ -76,6 +78,10 @@ class AiphoneJoRuntime:
         # One monitoring session at a time: outputs, images and live video.
         self.session_lock = asyncio.Lock()
         self.media = CameraMedia(hass, self)
+        update = signal_update(entry.entry_id)
+        self.calls = CallController(
+            hass, self, lambda: async_dispatcher_send(hass, update)
+        )
         self._remove_listener = client.add_listener(self._handle_event)
 
     @property
@@ -86,6 +92,7 @@ class AiphoneJoRuntime:
     async def async_stop(self) -> None:
         """Stop listening and disconnect."""
         self._remove_listener()
+        await self.calls.async_shutdown()
         await self.media.async_shutdown()
         await self.client.disconnect()
 
@@ -117,9 +124,11 @@ class AiphoneJoRuntime:
             async_dispatcher_send(self.hass, signal_ring(entry_id), self.last_ring)
             async_dispatcher_send(self.hass, signal_update(entry_id))
         elif isinstance(event, CallUpdatedEvent):
-            if event.call is self._call and not event.call.active and self.ringing:
+            answered_or_over = event.call.status is not CallStatus.RINGING
+            if event.call is self._call and answered_or_over and self.ringing:
                 self.ringing = False
                 async_dispatcher_send(self.hass, signal_update(entry_id))
+        self.calls.async_handle_event(event)
 
     def session_stations(self) -> list[Station]:
         """Camera stations, the one chosen in the options first."""

@@ -30,7 +30,10 @@ from custom_components.aiphone_jo.const import (
 )
 from custom_components.aiphone_jo.vendor.aiphone_jo import (
     AiphoneEvent,
+    CallStatus,
+    CallUpdatedEvent,
     CloudCredentials,
+    CommandRejectedError,
     DiscoveredMonitor,
     PairingRejectedError,
     PairingStep,
@@ -341,6 +344,62 @@ class FakeLive:
         self.error = error
 
 
+class FakeCallSession:
+    """Stand-in for CallSession: records the answering steps."""
+
+    def __init__(self, client: FakeClient, call: Any) -> None:
+        self.client = client
+        self.call = call
+        self.active = True
+        self.steps: list[str] = []
+        self.answer: str | None = None
+        self.first_answer = False
+
+    def _step(self, name: str) -> None:
+        self.steps.append(name)
+        if error := self.client.call_errors.get(name):
+            raise error
+
+    async def request_offer(self) -> str:
+        self._step("request_offer")
+        return JANUS_OFFER
+
+    async def send_answer(self, sdp: str) -> None:
+        self._step("send_answer")
+        self.answer = sdp
+
+    async def ready(self) -> None:
+        self._step("ready")
+
+    async def reply(self) -> None:
+        self._step("reply")
+        self.first_answer = True
+
+    async def start(self) -> bool:
+        self._step("start")
+        if self.client.call_start_result:
+            self.call.status = CallStatus.TALKING
+            self.client.emit(CallUpdatedEvent(self.call))
+        return self.client.call_start_result
+
+    async def close(self) -> dict[str, Any]:
+        self.steps.append("close")
+        self.active = False
+        self.call.status = CallStatus.ENDED
+        return {}
+
+    async def abort(self) -> None:
+        if self.call.status is CallStatus.TALKING or self.first_answer:
+            await self.close()
+        else:
+            self.steps.append("withdraw")
+            self.active = False
+
+    async def reject(self) -> None:
+        self._step("reject")
+        self.active = False
+
+
 class FakeClient:
     """Stand-in for AiphoneJoClient."""
 
@@ -358,6 +417,9 @@ class FakeClient:
         self.lives: list[FakeLive] = []
         self.live_errors: dict[int | None, BaseException] = {}
         self.gate: asyncio.Event | None = None
+        self.call_sessions: list[FakeCallSession] = []
+        self.call_errors: dict[str, BaseException] = {}
+        self.call_start_result = True
         self.live_monitor = self._live_monitor
 
     def _live_monitor(
@@ -369,6 +431,30 @@ class FakeClient:
         renew: bool = True,
     ) -> FakeLive:
         return FakeLive(self, negotiate, terminal, renew)
+
+    async def answer_call(
+        self, call: Any = None, negotiate: Any = None, *, talk: Any = None
+    ) -> FakeCallSession:
+        """Same sequence and teardown as the library's ``answer_call``."""
+        if error := self.call_errors.get("answer_call"):
+            raise error
+        session = FakeCallSession(self, call)
+        self.call_sessions.append(session)
+        if negotiate is None:
+            return session
+        try:
+            offer = await session.request_offer()
+            await session.send_answer(await negotiate(offer))
+            await session.ready()
+            await session.reply()
+            if not await session.start():
+                raise CommandRejectedError(
+                    "CALL_STA_REQ was not accepted.", mid="24008", rslt=None
+                )
+        except BaseException:
+            await session.abort()
+            raise
+        return session
 
     async def _connect(self) -> None:
         self.connected = True

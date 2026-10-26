@@ -2,6 +2,14 @@
 
 All notable changes to this integration.
 
+## Unreleased
+
+- Experimental call answering, disabled by default: Answer, Hang up and Reject
+  buttons and a Call state sensor. An answered call shows the visitor with
+  sound in the camera live view; talking back is not available yet. Calls are
+  hung up automatically after 200 seconds. The sensor tells why a call ended,
+  including when another phone answered first.
+
 ## 0.4.0
 
 - Entrance stations that keep their factory default Japanese name (such as

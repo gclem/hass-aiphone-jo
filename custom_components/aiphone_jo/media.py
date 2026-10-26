@@ -55,6 +55,13 @@ LIVE_STOPPED = (
     "The live view stopped: no new session could be opened on the entrance "
     "station. Open the camera again to retry."
 )
+CALL_STARTED = "A call was answered: open the camera again to see the visitor."
+CALL_ENDED = "The call ended."
+STOP_MESSAGES = {
+    "live_ended": LIVE_ENDED,
+    "call_started": CALL_STARTED,
+    "call_ended": CALL_ENDED,
+}
 
 
 class NoStationError(AiphoneJoError):
@@ -82,6 +89,7 @@ class CameraMedia:
         elif self._bridge is None:
             self.unavailable_reason = ISSUE_GO2RTC_UNAVAILABLE
         self._live: Any = None
+        self._call_session: Any = None
         self._watch: asyncio.Task[None] | None = None
         self._stopper: asyncio.Task[None] | None = None
         self._continuous: bool | None = None
@@ -99,8 +107,8 @@ class CameraMedia:
 
     @property
     def live(self) -> bool:
-        """True while a live session feeds the stream."""
-        return self._live is not None
+        """True while a live or call session feeds the stream."""
+        return self._live is not None or self._call_session is not None
 
     @property
     def _viewer_stream(self) -> str | None:
@@ -170,7 +178,7 @@ class CameraMedia:
         bridge = self._bridge
         assert bridge is not None
         async with self._start_lock:
-            if self._live is not None:
+            if self.live:
                 return
             client: Any = self._runtime.client
             if self._continuous is None:
@@ -208,9 +216,9 @@ class CameraMedia:
         if self._live is live:
             if renew:
                 _LOGGER.warning("The live view stopped: %s", live.error)
-            await self._async_stop(ended=True)
+            await self._async_stop(notice="live_ended")
 
-    async def _async_stop(self, *, ended: bool = False) -> None:
+    async def _async_stop(self, *, notice: str | None = None) -> None:
         self._cancel_stopper()
         live, self._live = self._live, None
         watch, self._watch = self._watch, None
@@ -218,10 +226,12 @@ class CameraMedia:
             watch.cancel()
         viewers, self._viewers = self._viewers, {}
         self._users = max(0, self._users - len(viewers))
-        message = LIVE_STOPPED if self._continuous else LIVE_ENDED
+        message = STOP_MESSAGES.get(notice or "", "")
+        if notice == "live_ended" and self._continuous:
+            message = LIVE_STOPPED
         for viewer, send_message in viewers.values():
-            if ended:
-                send_message(WebRTCError("live_ended", message))
+            if notice is not None:
+                send_message(WebRTCError(notice, message))
             await viewer.async_close()
         if live is not None:
             with contextlib.suppress(Exception):
@@ -267,7 +277,37 @@ class CameraMedia:
     async def async_shutdown(self) -> None:
         """Stop everything (unload)."""
         self._users = 0
+        self._call_session = None
         await self._async_stop()
+
+    # ------------------------------------------------------------- calls
+
+    async def async_prepare_call(self, notice: str = "call_started") -> None:
+        """Free the monitoring session for a call; live viewers are told why."""
+        await self._async_stop(notice=notice)
+
+    async def async_call_negotiator(self) -> Callable[[str], Awaitable[str]]:
+        """Prepare the stream for an answered call; returns its SDP negotiator."""
+        bridge = self._bridge
+        if not self.available or bridge is None:
+            raise Go2RtcError("Video is unavailable")
+        if self._continuous is None:
+            self._continuous = await bridge.async_relay_supported()
+        await bridge.async_ensure_stream()
+        if self._continuous:
+            await bridge.async_ensure_relay()
+        return bridge.async_ingest
+
+    def async_attach_call(self, session: Any) -> None:
+        """The stream is fed by an answered call instead of a live session."""
+        self._call_session = session
+
+    async def async_end_call(self) -> None:
+        """The call ended: disconnect its viewers."""
+        if self._call_session is None:
+            return
+        self._call_session = None
+        await self._async_stop(notice="call_ended")
 
     # ------------------------------------------------------------ images
 
@@ -276,10 +316,10 @@ class CameraMedia:
         bridge = self._bridge
         if not self.available or bridge is None:
             return self._image
-        if self._live is None and self._fresh():
+        if not self.live and self._fresh():
             return self._image
         async with self._image_lock:
-            if self._live is None and self._fresh():
+            if not self.live and self._fresh():
                 return self._image
             try:
                 if self._live is not None:

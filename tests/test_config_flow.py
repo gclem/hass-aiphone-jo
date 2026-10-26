@@ -13,6 +13,7 @@ from homeassistant.data_entry_flow import FlowResultType, InvalidData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.aiphone_jo.const import (
+    CONF_CALL_ANSWERING,
     CONF_CREDENTIALS,
     CONF_FINGERPRINT,
     CONF_GO2RTC_PASSWORD,
@@ -727,12 +728,20 @@ async def test_options(hass: HomeAssistant, config_entry: MockConfigEntry) -> No
     result = await hass.config_entries.options.async_init(config_entry.entry_id)
     assert result["step_id"] == "init"
     defaults = result["data_schema"]({})
-    assert defaults == {CONF_STATION: "101", CONF_IMAGE_REFRESH: 30}
+    assert defaults == {
+        CONF_STATION: "101",
+        CONF_IMAGE_REFRESH: 30,
+        CONF_CALL_ANSWERING: False,
+    }
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {CONF_STATION: "102", CONF_IMAGE_REFRESH: 120}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert config_entry.options == {CONF_STATION: 102, CONF_IMAGE_REFRESH: 120}
+    assert config_entry.options == {
+        CONF_STATION: 102,
+        CONF_IMAGE_REFRESH: 120,
+        CONF_CALL_ANSWERING: False,
+    }
 
 
 @pytest.mark.parametrize(
@@ -782,11 +791,14 @@ async def test_options_without_stations(
     )
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert result["data_schema"]({}) == {CONF_IMAGE_REFRESH: 30}
+    assert result["data_schema"]({}) == {
+        CONF_IMAGE_REFRESH: 30,
+        CONF_CALL_ANSWERING: False,
+    }
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {CONF_IMAGE_REFRESH: 60}
     )
-    assert entry.options == {CONF_IMAGE_REFRESH: 60}
+    assert entry.options == {CONF_IMAGE_REFRESH: 60, CONF_CALL_ANSWERING: False}
 
 
 async def test_options_go2rtc_url(
@@ -817,6 +829,7 @@ async def test_options_go2rtc_url(
     assert config_entry.options == {
         CONF_STATION: 101,
         CONF_IMAGE_REFRESH: 30,
+        CONF_CALL_ANSWERING: False,
         CONF_GO2RTC_URL: url,
         CONF_GO2RTC_USERNAME: "user",
         CONF_GO2RTC_PASSWORD: "example-password",

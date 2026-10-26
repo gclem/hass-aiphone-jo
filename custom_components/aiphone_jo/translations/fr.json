@@ -114,11 +114,13 @@
           "image_refresh_interval": "Intervalle de rafraîchissement de l'image",
           "go2rtc_url": "URL de go2rtc (facultatif)",
           "go2rtc_username": "Utilisateur go2rtc (facultatif)",
-          "go2rtc_password": "Mot de passe go2rtc (facultatif)"
+          "go2rtc_password": "Mot de passe go2rtc (facultatif)",
+          "call_answering": "Décroché des appels (expérimental)"
         },
         "data_description": {
           "image_refresh_interval": "Délai minimal entre deux images de la caméra (10 à 3600 secondes). L'image n'est rafraîchie que lorsqu'elle est affichée, et chaque rafraîchissement ouvre une session de surveillance sur la platine de rue.",
-          "go2rtc_url": "Laissez vide pour utiliser le serveur go2rtc lancé par Home Assistant (Home Assistant OS et Container). Renseignez-la pour une installation Home Assistant Core ou un go2rtc externe, par exemple http://192.0.2.10:1984."
+          "go2rtc_url": "Laissez vide pour utiliser le serveur go2rtc lancé par Home Assistant (Home Assistant OS et Container). Renseignez-la pour une installation Home Assistant Core ou un go2rtc externe, par exemple http://192.0.2.10:1984.",
+          "call_answering": "Ajoute les boutons Décrocher, Raccrocher et Refuser ainsi qu'un capteur d'état d'appel. Quand vous décrochez, le live de la caméra montre le visiteur et diffuse son son ; vous ne pouvez pas encore lui parler. Expérimental : pas encore validé sur le matériel réel. Un appel est raccroché automatiquement au bout de 200 secondes, comme dans l'application officielle."
         }
       }
     },
@@ -147,6 +149,15 @@
       },
       "action_2": {
         "name": "Action 2"
+      },
+      "call_answer": {
+        "name": "Décrocher"
+      },
+      "call_hang_up": {
+        "name": "Raccrocher"
+      },
+      "call_reject": {
+        "name": "Refuser"
       }
     },
     "event": {
@@ -176,6 +187,39 @@
           },
           "raw_name": {
             "name": "Nom d'origine"
+          }
+        }
+      },
+      "call_state": {
+        "name": "Appel",
+        "state": {
+          "idle": "Aucun",
+          "ringing": "Sonnerie",
+          "connecting": "Connexion",
+          "talking": "En communication",
+          "ended": "Terminé",
+          "rejected": "Refusé",
+          "missed": "Manqué",
+          "answered_elsewhere": "Décroché ailleurs",
+          "failed": "Échec"
+        },
+        "state_attributes": {
+          "station": {
+            "name": "Platine de rue"
+          },
+          "started_at": {
+            "name": "Début"
+          },
+          "end_reason": {
+            "name": "Raison de fin",
+            "state": {
+              "answered_elsewhere": "Décroché sur un autre téléphone",
+              "ended_by_station": "Terminé par la platine",
+              "cancelled_by_station": "Annulé par la platine",
+              "expired": "Sans réponse",
+              "rejected": "Refusé",
+              "ended_by_client": "Terminé depuis Home Assistant"
+            }
           }
         }
       }
@@ -225,6 +269,27 @@
     },
     "station_entrance": {
       "message": "Entrée {number}"
+    },
+    "call_answering_disabled": {
+      "message": "Le décroché des appels est désactivé : activez-le dans les options de l'intégration."
+    },
+    "call_not_ringing": {
+      "message": "Aucun appel en cours de sonnerie."
+    },
+    "call_not_active": {
+      "message": "Aucun appel en cours."
+    },
+    "call_video_unavailable": {
+      "message": "Impossible de décrocher : la caméra est indisponible (voir la notification de réparation)."
+    },
+    "call_answered_elsewhere": {
+      "message": "L'appel a été décroché sur un autre téléphone."
+    },
+    "call_ended": {
+      "message": "L'appel s'est terminé avant d'avoir pu être décroché."
+    },
+    "call_failed": {
+      "message": "L'appel n'a pas pu être décroché ({code}). Réessayez à la prochaine sonnerie ; si le problème persiste, signalez ce code."
     }
   },
   "issues": {

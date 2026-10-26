@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import Entity
@@ -54,3 +58,14 @@ class AiphoneJoEntity(Entity):
                 self.async_write_ha_state,
             )
         )
+
+
+def async_remove_disabled(
+    hass: HomeAssistant, runtime: AiphoneJoRuntime, domain: str, keys: Iterable[str]
+) -> None:
+    """Remove entities of a disabled optional feature from the registry."""
+    registry = er.async_get(hass)
+    for key in keys:
+        unique_id = f"{runtime.entry.unique_id}_{key}"
+        if entity_id := registry.async_get_entity_id(domain, DOMAIN, unique_id):
+            registry.async_remove(entity_id)

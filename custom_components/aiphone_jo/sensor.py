@@ -4,13 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.sensor import RestoreSensor
+from homeassistant.components.sensor import (
+    RestoreSensor,
+    SensorDeviceClass,
+    SensorEntity,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import AiphoneJoConfigEntry
+from .call import CallState
 from .const import ATTR_RAW_NAME
-from .entity import AiphoneJoEntity
+from .entity import AiphoneJoEntity, async_remove_disabled
 
 ATTR_RANG_AT = "rang_at"
 
@@ -20,8 +25,14 @@ async def async_setup_entry(
     entry: AiphoneJoConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the last station sensor."""
-    async_add_entities([AiphoneJoLastStationSensor(entry.runtime_data, "last_station")])
+    """Set up the last station sensor and, when enabled, the call state."""
+    runtime = entry.runtime_data
+    entities: list[SensorEntity] = [AiphoneJoLastStationSensor(runtime, "last_station")]
+    if runtime.calls.enabled:
+        entities.append(AiphoneJoCallStateSensor(runtime, "call_state"))
+    else:
+        async_remove_disabled(hass, runtime, "sensor", ["call_state"])
+    async_add_entities(entities)
 
 
 class AiphoneJoLastStationSensor(AiphoneJoEntity, RestoreSensor):
@@ -59,4 +70,26 @@ class AiphoneJoLastStationSensor(AiphoneJoEntity, RestoreSensor):
         return {
             ATTR_RANG_AT: ring.at.isoformat() if ring else self._restored_at,
             ATTR_RAW_NAME: self._raw_name,
+        }
+
+
+class AiphoneJoCallStateSensor(AiphoneJoEntity, SensorEntity):
+    """State of the current or last call (experimental call answering)."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = [state.value for state in CallState]  # noqa: RUF012
+
+    @property
+    def native_value(self) -> str:
+        """Call state."""
+        return self.runtime.calls.state.value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Station and start time of the call."""
+        calls = self.runtime.calls
+        return {
+            "station": calls.station,
+            "started_at": calls.started_at.isoformat() if calls.started_at else None,
+            "end_reason": calls.end_reason,
         }

@@ -103,6 +103,29 @@ start.
 If go2rtc cannot be reached, the camera is unavailable and a repair notice
 explains what to do; the other entities keep working.
 
+### Call answering (experimental)
+
+Disabled by default. When enabled in the options, the integration adds:
+
+| Platform | Entity | Description |
+|---|---|---|
+| `button` | Answer | Answers the ringing call. |
+| `button` | Hang up | Ends the call answered from Home Assistant. |
+| `button` | Reject | Declines the ringing call. |
+| `sensor` | Call | `idle`, `ringing`, `connecting`, `talking`, `ended`, `rejected`, `missed`, `answered_elsewhere` or `failed`, with the `station`, `started_at` and `end_reason` (`answered_elsewhere`, `ended_by_station`, `cancelled_by_station`, `expired`, `rejected` or `ended_by_client`). |
+
+After **Answer**, open the camera: the live view shows the visitor with sound.
+Talking back to the visitor is not available yet. A call is hung up
+automatically after 200 seconds (the limit of the official app), and when
+the integration is reloaded. If another phone answers first, the call shows
+`answered_elsewhere`. The
+output buttons keep working during a call. Call answering needs the camera
+(go2rtc).
+
+This feature is **experimental**: it follows the official app's behaviour but
+has not been validated on real hardware yet. Please report how it behaves with
+your installation.
+
 Entities become unavailable while the cloud connection is down; the
 integration reconnects automatically.
 
@@ -166,7 +189,8 @@ Every error message says what to do. The most common cases:
   camera station by default);
 - the camera image refresh interval (30 seconds by default, 10 to 3600);
 - the URL of a go2rtc server, with optional credentials, when Home Assistant
-  does not run go2rtc itself (Home Assistant Core installations).
+  does not run go2rtc itself (Home Assistant Core installations);
+- call answering (experimental, disabled by default).
 
 Changes apply immediately, without restarting Home Assistant.
 
@@ -191,7 +215,8 @@ name to delete.
 
 - **Doorbell detection is experimental.** Ring events may be missed or
   delayed; please report whether they work with your installation.
-- Call answering, two-way audio and output status are not available yet.
+- Call answering is experimental and one-way: you see and hear the visitor,
+  but cannot talk back yet. Output status is not available yet.
 - The live view is interrupted for a few seconds about every minute, when the
   entrance station's session is renewed. Audio is one-way (from the entrance
   station).

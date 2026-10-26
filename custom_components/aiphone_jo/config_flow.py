@@ -19,6 +19,7 @@ from homeassistant.const import CONF_ADDRESS, CONF_HOST, CONF_PORT
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -42,6 +43,7 @@ from .api import (
     stations_from_room_info,
 )
 from .const import (
+    CONF_CALL_ANSWERING,
     CONF_CREDENTIALS,
     CONF_FINGERPRINT,
     CONF_GO2RTC_PASSWORD,
@@ -583,6 +585,9 @@ class AiphoneJoOptionsFlow(OptionsFlow):
             }
             if CONF_STATION in user_input:
                 options[CONF_STATION] = int(user_input[CONF_STATION])
+            options[CONF_CALL_ANSWERING] = bool(
+                user_input.get(CONF_CALL_ANSWERING, False)
+            )
             if url := str(user_input.get(CONF_GO2RTC_URL) or "").strip():
                 options[CONF_GO2RTC_URL] = url
                 for key in (CONF_GO2RTC_USERNAME, CONF_GO2RTC_PASSWORD):
@@ -624,6 +629,12 @@ class AiphoneJoOptionsFlow(OptionsFlow):
                 unit_of_measurement="s",
             )
         )
+        schema[
+            vol.Required(
+                CONF_CALL_ANSWERING,
+                default=bool(current.get(CONF_CALL_ANSWERING, False)),
+            )
+        ] = BooleanSelector()
         for key, selector in (
             (
                 CONF_GO2RTC_URL,

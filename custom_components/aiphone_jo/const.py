@@ -37,6 +37,7 @@ CONF_TERMINAL_NAME: Final = "terminal_name"
 # Options (entry.options).
 CONF_STATION: Final = "station"
 CONF_IMAGE_REFRESH: Final = "image_refresh_interval"
+CONF_CALL_ANSWERING: Final = "call_answering"
 CONF_GO2RTC_URL: Final = "go2rtc_url"
 CONF_GO2RTC_USERNAME: Final = "go2rtc_username"
 CONF_GO2RTC_PASSWORD: Final = "go2rtc_password"

@@ -14,11 +14,30 @@
       },
       "action_2": {
         "default": "mdi:numeric-2-box-outline"
+      },
+      "call_answer": {
+        "default": "mdi:phone"
+      },
+      "call_hang_up": {
+        "default": "mdi:phone-hangup"
+      },
+      "call_reject": {
+        "default": "mdi:phone-cancel"
       }
     },
     "sensor": {
       "last_station": {
         "default": "mdi:doorbell-video"
+      },
+      "call_state": {
+        "default": "mdi:phone-in-talk",
+        "state": {
+          "idle": "mdi:phone-outline",
+          "ringing": "mdi:phone-ring",
+          "missed": "mdi:phone-missed",
+          "rejected": "mdi:phone-cancel",
+          "failed": "mdi:phone-alert"
+        }
       }
     },
     "camera": {

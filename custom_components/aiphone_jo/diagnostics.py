@@ -26,5 +26,7 @@ async def async_get_config_entry_diagnostics(
             "station_count": len(runtime.stations),
             "ringing": runtime.ringing,
             "camera_available": runtime.media.available,
+            "call_answering": runtime.calls.enabled,
+            "call_state": runtime.calls.state.value,
         }
     return diagnostics
