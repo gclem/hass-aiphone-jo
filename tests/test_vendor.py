@@ -10,9 +10,18 @@ from scripts.release_tools import VENDORED_VERSION, parse_vendored_version
 
 
 def test_vendored_package_imports() -> None:
-    """Every vendored module imports from its vendored location."""
+    """Every vendored module imports from its vendored location.
+
+    Modules of optional extras that are not installed are skipped.
+    """
+    optional = getattr(aiphone_jo, "MediaUnavailableError", None)
     for module in pkgutil.walk_packages(aiphone_jo.__path__, f"{aiphone_jo.__name__}."):
-        importlib.import_module(module.name)
+        try:
+            importlib.import_module(module.name)
+        except Exception as err:
+            if optional is not None and isinstance(err, optional):
+                continue
+            raise
 
 
 def test_vendored_version_matches_package() -> None:
