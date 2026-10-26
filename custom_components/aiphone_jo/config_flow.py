@@ -538,7 +538,7 @@ class AiphoneJoConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class AiphoneJoOptionsFlow(OptionsFlow):
-    """Choose the entrance station that carries the opening session."""
+    """Choose the entrance station that carries the output session."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None

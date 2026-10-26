@@ -56,8 +56,8 @@ from .conftest import (
 EVENT = "event.aiphone_jo_1mdw_ring"
 RINGING = "binary_sensor.aiphone_jo_1mdw_ringing"
 LAST_STATION = "sensor.aiphone_jo_1mdw_last_ringing_station"
-LARGE = "button.aiphone_jo_1mdw_large_opening"
-SMALL = "button.aiphone_jo_1mdw_small_opening"
+ACTION_1 = "button.aiphone_jo_1mdw_action_1"
+ACTION_2 = "button.aiphone_jo_1mdw_action_2"
 
 
 def _call(term_id: int = 102) -> IncomingCall:
@@ -92,7 +92,7 @@ async def test_setup_and_unload(
     client = _client(client_holder)
     assert loaded_entry.state is ConfigEntryState.LOADED
     assert client.kwargs["ring_timeout"] == 60
-    for entity_id in (EVENT, RINGING, LAST_STATION, LARGE, SMALL):
+    for entity_id in (EVENT, RINGING, LAST_STATION, ACTION_1, ACTION_2):
         assert hass.states.get(entity_id) is not None, entity_id
     assert hass.states.get(RINGING).state == STATE_OFF
 
@@ -132,14 +132,14 @@ async def test_stations_refreshed(
     hass: HomeAssistant, config_entry: MockConfigEntry, client_holder: ClientHolder
 ) -> None:
     """Stations are refreshed at startup, or kept when the cloud fails."""
-    renamed = Terminal(id=101, term_kind=5, name="Gate", camera=True, ent_key_type=None)
+    renamed = Terminal(id=101, term_kind=5, name="Side", camera=True, ent_key_type=None)
     client_holder.setup = lambda c: setattr(
         c.get_room_info, "return_value", RoomInfo(terminals=(renamed,), term_inf_num=1)
     )
     await hass.config_entries.async_setup(config_entry.entry_id)
     await hass.async_block_till_done()
     assert config_entry.data[CONF_STATIONS] == [
-        {"id": 101, "kind": 5, "name": "Gate", "camera": True}
+        {"id": 101, "kind": 5, "name": "Side", "camera": True}
     ]
     assert config_entry.state is ConfigEntryState.LOADED
 
@@ -220,7 +220,7 @@ async def test_availability(
     client.connected = False
     client.emit(ConnectionStateEvent(False, False, "lost"))
     await hass.async_block_till_done()
-    for entity_id in (RINGING, LAST_STATION, LARGE, SMALL):
+    for entity_id in (RINGING, LAST_STATION, ACTION_1, ACTION_2):
         assert hass.states.get(entity_id).state == STATE_UNAVAILABLE
 
     client.connected = True
@@ -230,18 +230,18 @@ async def test_availability(
 
 
 @pytest.mark.parametrize(
-    ("entity_id", "gate"), [(LARGE, Gate.MAIN), (SMALL, Gate.OPTION)]
+    ("entity_id", "output"), [(ACTION_1, Gate.MAIN), (ACTION_2, Gate.OPTION)]
 )
 async def test_buttons(
     hass: HomeAssistant,
     loaded_entry: MockConfigEntry,
     client_holder: ClientHolder,
     entity_id: str,
-    gate: Gate,
+    output: Gate,
 ) -> None:
     """Each button pulses its output through the first camera station."""
     await _press(hass, entity_id)
-    _client(client_holder).open_door.assert_awaited_once_with(gate, 101, 5)
+    _client(client_holder).open_door.assert_awaited_once_with(output, 101, 5)
 
 
 async def test_preferred_station(
@@ -251,7 +251,7 @@ async def test_preferred_station(
     hass.config_entries.async_update_entry(config_entry, options={CONF_STATION: 102})
     await hass.config_entries.async_setup(config_entry.entry_id)
     await hass.async_block_till_done()
-    await _press(hass, LARGE)
+    await _press(hass, ACTION_1)
     _client(client_holder).open_door.assert_awaited_once_with(Gate.MAIN, 102, 5)
 
 
@@ -275,7 +275,7 @@ async def test_busy_station_fallback(
         StationBusyError("busy", mid="24021", rslt=486),
         None,
     ]
-    await _press(hass, LARGE)
+    await _press(hass, ACTION_1)
     assert [call.args for call in client.open_door.await_args_list] == [
         (Gate.MAIN, 101, 5),
         (Gate.MAIN, 102, 5),
@@ -300,14 +300,14 @@ async def test_button_errors(
     """Failures are reported with an actionable message."""
     _client(client_holder).open_door.side_effect = error
     with pytest.raises(HomeAssistantError) as exc_info:
-        await _press(hass, LARGE)
+        await _press(hass, ACTION_1)
     assert exc_info.value.translation_key == key
 
 
 async def test_no_station(
     hass: HomeAssistant, config_entry: MockConfigEntry, client_holder: ClientHolder
 ) -> None:
-    """Openings explain that a station is needed."""
+    """The output buttons explain that a station is needed."""
     hass.config_entries.async_update_entry(
         config_entry, data={**config_entry.data, CONF_STATIONS: []}
     )
@@ -317,11 +317,11 @@ async def test_no_station(
     await hass.config_entries.async_setup(config_entry.entry_id)
     await hass.async_block_till_done()
     with pytest.raises(HomeAssistantError) as exc_info:
-        await _press(hass, LARGE)
+        await _press(hass, ACTION_1)
     assert exc_info.value.translation_key == "no_station"
 
 
-async def test_openings_are_serialized(
+async def test_outputs_are_serialized(
     hass: HomeAssistant, loaded_entry: MockConfigEntry, client_holder: ClientHolder
 ) -> None:
     """Only one monitoring session runs at a time."""
@@ -337,7 +337,7 @@ async def test_openings_are_serialized(
 
     client = _client(client_holder)
     client.open_door.side_effect = open_door
-    await asyncio.gather(_press(hass, LARGE), _press(hass, SMALL))
+    await asyncio.gather(_press(hass, ACTION_1), _press(hass, ACTION_2))
     assert client.open_door.await_count == 2
     assert peak == 1
 
@@ -542,3 +542,33 @@ async def test_remove_entry_unregisters_through_library(
         await hass.async_block_till_done()
     call.assert_awaited_once()
     notify.assert_not_called()
+
+
+async def test_existing_button_entities_are_kept(
+    hass: HomeAssistant, config_entry: MockConfigEntry, client_holder: ClientHolder
+) -> None:
+    """Buttons created under their former names keep their entity ids."""
+    entities = er.async_get(hass)
+    old = entities.async_get_or_create(
+        "button",
+        DOMAIN,
+        f"{config_entry.unique_id}_large_opening",
+        config_entry=config_entry,
+        suggested_object_id="aiphone_jo_1mdw_large_opening",
+    )
+    await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    buttons = [
+        entity
+        for entity in er.async_entries_for_config_entry(entities, config_entry.entry_id)
+        if entity.domain == "button"
+    ]
+    assert len(buttons) == 2
+    kept = entities.async_get(old.entity_id)
+    assert kept is not None
+    assert kept.translation_key == "action_1"
+    state = hass.states.get(old.entity_id)
+    assert state.attributes["friendly_name"].endswith("Action 1")
+    await _press(hass, old.entity_id)
+    _client(client_holder).open_door.assert_awaited_once_with(Gate.MAIN, 101, 5)

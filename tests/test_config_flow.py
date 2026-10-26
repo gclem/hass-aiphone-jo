@@ -613,7 +613,7 @@ async def test_reconfigure_unregister_failure_notifies(
 
 
 async def test_options(hass: HomeAssistant, config_entry: MockConfigEntry) -> None:
-    """The station carrying openings can be chosen."""
+    """The station carrying the output session can be chosen."""
     result = await hass.config_entries.options.async_init(config_entry.entry_id)
     assert result["step_id"] == "init"
     result = await hass.config_entries.options.async_configure(

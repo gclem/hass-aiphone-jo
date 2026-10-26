@@ -9,11 +9,11 @@
       }
     },
     "button": {
-      "large_opening": {
-        "default": "mdi:gate-open"
+      "action_1": {
+        "default": "mdi:numeric-1-box-outline"
       },
-      "small_opening": {
-        "default": "mdi:door-open"
+      "action_2": {
+        "default": "mdi:numeric-2-box-outline"
       }
     },
     "sensor": {

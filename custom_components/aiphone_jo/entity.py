@@ -23,12 +23,14 @@ class AiphoneJoEntity(Entity):
     _attr_has_entity_name = True
     _attr_should_poll = False
 
-    def __init__(self, runtime: AiphoneJoRuntime, key: str) -> None:
+    def __init__(
+        self, runtime: AiphoneJoRuntime, key: str, *, unique_key: str | None = None
+    ) -> None:
         """Initialize."""
         self.runtime = runtime
         entry = runtime.entry
         self._attr_translation_key = key
-        self._attr_unique_id = f"{entry.unique_id}_{key}"
+        self._attr_unique_id = f"{entry.unique_id}_{unique_key or key}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(entry.unique_id))},
             manufacturer=MANUFACTURER,

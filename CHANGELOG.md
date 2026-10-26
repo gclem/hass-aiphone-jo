@@ -2,6 +2,12 @@
 
 All notable changes to this integration.
 
+## Unreleased
+
+- The output buttons are now named **Action 1** (output 1, unlock) and
+  **Action 2** (output 2, option), since their effect depends on each
+  installation. Existing entities are kept; only their default name changes.
+
 ## 0.2.1
 
 - Clearer pairing errors, including refusals reported during discovery, an
@@ -21,9 +27,9 @@ All notable changes to this integration.
   address, certificate check, monitor code, terminal name, with actionable
   error messages and resumable steps.
 - Ring event, ringing and last ringing station sensors.
-- Large opening and Small opening buttons.
+- Buttons triggering the monitor's two outputs.
 - Re-pairing (reauth and reconfigure), options to choose the entrance station
-  used for openings, and removal guidance.
+  used for the output buttons, and removal guidance.
 - English and French translations.
 - Update the aiphone-jo library to 0.2.0.
 

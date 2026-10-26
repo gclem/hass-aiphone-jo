@@ -29,8 +29,8 @@ The integration ships with its own copy of the library.
 ## Features
 
 - **Ring** detection (call button pressed on an entrance station).
-- **Large opening** and **Small opening** buttons (the monitor's two lock
-  outputs).
+- **Action 1** and **Action 2** buttons, which trigger the monitor's two
+  outputs.
 
 See the [roadmap](ROADMAP.md) for upcoming features.
 
@@ -43,16 +43,19 @@ All entities belong to one device, the monitor.
 | `event` | Ring | Doorbell event fired on each call, with the `station` that rang. |
 | `binary_sensor` | Ringing | On while a station is calling; off when the call is answered elsewhere, cancelled, or after 60 seconds. |
 | `sensor` | Last ringing station | Name of the station that rang last (kept across restarts), with `rang_at`. |
-| `button` | Large opening | Pulses lock output 1. |
-| `button` | Small opening | Pulses lock output 2. |
+| `button` | Action 1 | Pulses output 1 of the monitor (unlock output). |
+| `button` | Action 2 | Pulses output 2 of the monitor (option output). |
 
-Openings are **buttons** (pulses), not locks: the intercom does not report any
-open/closed state. The monitor only accepts opening commands during a short
-monitoring session: the integration opens one on an entrance station, sends
-the command and closes it immediately. One session runs at a time, so
-successive presses are queued. If the station is busy (call or monitoring in
-progress), the other camera stations are tried. You can rename both buttons in
-Home Assistant.
+What each output does depends on your installation: a door strike, a gate
+motor, lighting or any other equipment wired to it. Rename the buttons in Home
+Assistant to match it.
+
+The buttons send **pulses**: they are not locks or switches, and the intercom
+does not report any state for its outputs. The monitor only accepts output
+commands during a short monitoring session: the integration opens one on an
+entrance station, sends the command and closes it immediately. One session
+runs at a time, so successive presses are queued. If the station is busy (call
+or monitoring in progress), the other camera stations are tried.
 
 Entities become unavailable while the cloud connection is down; the
 integration reconnects automatically.
@@ -111,7 +114,7 @@ Every error message says what to do. The most common cases:
 
 ### Options
 
-**Configure** lets you choose the entrance station used to carry the opening
+**Configure** lets you choose the entrance station used to carry the output
 session (the first camera station by default).
 
 ### Pairing again
@@ -135,9 +138,9 @@ name to delete.
 
 - **Doorbell detection is experimental.** Ring events may be missed or
   delayed; please report whether they work with your installation.
-- The camera, call answering and lock status are not available yet.
-- Openings briefly open a monitoring session on an entrance station; the
-  station may show it on its screen.
+- The camera, call answering and output status are not available yet.
+- The output buttons briefly open a monitoring session on an entrance station;
+  the station may show it on its screen.
 - Unregistering the terminal when the integration is removed may not remove
   it from the monitor's smartphone list; delete it there if it still appears.
 - Only the JO-1MDW monitor is supported.

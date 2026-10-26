@@ -1,4 +1,4 @@
-"""Door opening buttons (pulses, not locks)."""
+"""Buttons triggering the monitor's two outputs (pulses, not locks)."""
 
 from __future__ import annotations
 
@@ -11,30 +11,37 @@ from .coordinator import AiphoneJoRuntime
 from .entity import AiphoneJoEntity
 from .vendor.aiphone_jo import Gate
 
+# (translation key, unique id suffix, monitor output). The unique id suffixes
+# predate the current names and must not change: entities would be recreated.
+BUTTONS: tuple[tuple[str, str, Gate], ...] = (
+    ("action_1", "large_opening", Gate.MAIN),
+    ("action_2", "small_opening", Gate.OPTION),
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: AiphoneJoConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the opening buttons."""
+    """Set up the output buttons."""
     runtime = entry.runtime_data
     async_add_entities(
-        [
-            AiphoneJoOpenButton(runtime, "large_opening", Gate.MAIN),
-            AiphoneJoOpenButton(runtime, "small_opening", Gate.OPTION),
-        ]
+        AiphoneJoOutputButton(runtime, key, unique_key, output)
+        for key, unique_key, output in BUTTONS
     )
 
 
-class AiphoneJoOpenButton(AiphoneJoEntity, ButtonEntity):
-    """Pulse one of the monitor's lock outputs."""
+class AiphoneJoOutputButton(AiphoneJoEntity, ButtonEntity):
+    """Pulse one of the monitor's outputs (1: unlock, 2: option)."""
 
-    def __init__(self, runtime: AiphoneJoRuntime, key: str, gate: Gate) -> None:
+    def __init__(
+        self, runtime: AiphoneJoRuntime, key: str, unique_key: str, output: Gate
+    ) -> None:
         """Initialize."""
-        super().__init__(runtime, key)
-        self._gate = gate
+        super().__init__(runtime, key, unique_key=unique_key)
+        self._output = output
 
     async def async_press(self) -> None:
-        """Open."""
-        await self.runtime.async_open(self._gate)
+        """Trigger the output."""
+        await self.runtime.async_pulse(self._output)

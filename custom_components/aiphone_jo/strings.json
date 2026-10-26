@@ -107,8 +107,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "Door opening",
-        "description": "Openings go through a short monitoring session carried by an entrance station. If it is busy, the other stations are tried.",
+        "title": "Monitor outputs",
+        "description": "The two output buttons go through a short monitoring session carried by an entrance station. If it is busy, the other stations are tried.",
         "data": {
           "station": "Preferred entrance station"
         }
@@ -133,11 +133,11 @@
       }
     },
     "button": {
-      "large_opening": {
-        "name": "Large opening"
+      "action_1": {
+        "name": "Action 1"
       },
-      "small_opening": {
-        "name": "Small opening"
+      "action_2": {
+        "name": "Action 2"
       }
     },
     "event": {
@@ -174,7 +174,7 @@
       "message": "The Aiphone service is unreachable. Home Assistant will retry automatically."
     },
     "no_station": {
-      "message": "No entrance station with a camera is known: openings need one. Reload the integration while the cloud is reachable."
+      "message": "No entrance station with a camera is known: the output buttons need one. Reload the integration while the cloud is reachable."
     },
     "not_connected": {
       "message": "Not connected to the monitor. Home Assistant reconnects automatically; try again shortly."
@@ -183,10 +183,10 @@
       "message": "The monitor did not answer in time. Try again."
     },
     "command_rejected": {
-      "message": "The monitor refused the opening ({code}). Try again in a few seconds."
+      "message": "The monitor refused the action ({code}). Try again in a few seconds."
     },
     "command_failed": {
-      "message": "The opening failed ({code}). Try again."
+      "message": "The action failed ({code}). Try again."
     },
     "station_busy": {
       "message": "Every entrance station is busy (call or monitoring in progress). Try again in a few seconds."

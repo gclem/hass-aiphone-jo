@@ -69,7 +69,7 @@ class AiphoneJoRuntime:
         self.ringing = False
         self.last_ring: Ring | None = None
         self._call: IncomingCall | None = None
-        self._door_lock = asyncio.Lock()
+        self._output_lock = asyncio.Lock()
         self._remove_listener = client.add_listener(self._handle_event)
 
     @property
@@ -118,17 +118,17 @@ class AiphoneJoRuntime:
         preferred = self.entry.options.get(CONF_STATION)
         return sorted(self.stations, key=lambda station: station.id != preferred)
 
-    async def async_open(self, gate: Gate) -> None:
-        """Pulse a lock output; one monitoring session at a time."""
+    async def async_pulse(self, output: Gate) -> None:
+        """Pulse a monitor output; one monitoring session at a time."""
         stations = self._session_stations()
         if not stations:
             raise HomeAssistantError(
                 translation_domain=DOMAIN, translation_key="no_station"
             )
-        async with self._door_lock:
+        async with self._output_lock:
             for station in stations:
                 try:
-                    await self.client.open_door(gate, station.id, station.kind)
+                    await self.client.open_door(output, station.id, station.kind)
                 except StationBusyError:
                     _LOGGER.debug("Station %s busy, trying the next one", station.id)
                     continue

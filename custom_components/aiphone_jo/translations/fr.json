@@ -107,8 +107,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "Ouverture des portes",
-        "description": "Les ouvertures passent par une courte session de surveillance portée par une platine de rue. Si elle est occupée, les autres platines sont essayées.",
+        "title": "Sorties du moniteur",
+        "description": "Les deux boutons de sortie passent par une courte session de surveillance portée par une platine de rue. Si elle est occupée, les autres platines sont essayées.",
         "data": {
           "station": "Platine de rue préférée"
         }
@@ -133,11 +133,11 @@
       }
     },
     "button": {
-      "large_opening": {
-        "name": "Grande ouverture"
+      "action_1": {
+        "name": "Action 1"
       },
-      "small_opening": {
-        "name": "Petite ouverture"
+      "action_2": {
+        "name": "Action 2"
       }
     },
     "event": {
@@ -174,7 +174,7 @@
       "message": "Le service Aiphone est injoignable. Home Assistant réessaiera automatiquement."
     },
     "no_station": {
-      "message": "Aucune platine de rue à caméra n'est connue : les ouvertures en ont besoin. Rechargez l'intégration quand le cloud est joignable."
+      "message": "Aucune platine de rue à caméra n'est connue : les boutons de sortie en ont besoin. Rechargez l'intégration quand le cloud est joignable."
     },
     "not_connected": {
       "message": "Pas de connexion avec le moniteur. Home Assistant se reconnecte automatiquement ; réessayez dans un instant."
@@ -183,10 +183,10 @@
       "message": "Le moniteur n'a pas répondu à temps. Réessayez."
     },
     "command_rejected": {
-      "message": "Le moniteur a refusé l'ouverture ({code}). Réessayez dans quelques secondes."
+      "message": "Le moniteur a refusé l'action ({code}). Réessayez dans quelques secondes."
     },
     "command_failed": {
-      "message": "L'ouverture a échoué ({code}). Réessayez."
+      "message": "L'action a échoué ({code}). Réessayez."
     },
     "station_busy": {
       "message": "Toutes les platines de rue sont occupées (appel ou surveillance en cours). Réessayez dans quelques secondes."
