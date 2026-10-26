@@ -15,6 +15,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from .api import Station
 from .const import CONF_STATION, DOMAIN
 from .media import CameraMedia
+from .names import StationNamer
 from .vendor.aiphone_jo import (
     AiphoneEvent,
     AiphoneJoClient,
@@ -60,12 +61,14 @@ class AiphoneJoRuntime:
         entry: ConfigEntry,
         client: AiphoneJoClient,
         stations: list[Station],
+        namer: StationNamer | None = None,
     ) -> None:
         """Initialize."""
         self.hass = hass
         self.entry = entry
         self.client = client
         self.stations = stations
+        self.station_label = namer or StationNamer()
         self.options = dict(entry.options)
         self.ringing = False
         self.last_ring: Ring | None = None

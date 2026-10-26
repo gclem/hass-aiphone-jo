@@ -42,9 +42,9 @@ All entities belong to one device, the monitor.
 
 | Platform | Entity | Description |
 |---|---|---|
-| `event` | Ring | Doorbell event fired on each call, with the `station` that rang. |
+| `event` | Ring | Doorbell event fired on each call, with the `station` that rang and its `raw_name`. |
 | `binary_sensor` | Ringing | On while a station is calling; off when the call is answered elsewhere, cancelled, or after 60 seconds. |
-| `sensor` | Last ringing station | Name of the station that rang last (kept across restarts), with `rang_at`. |
+| `sensor` | Last ringing station | Name of the station that rang last (kept across restarts), with `rang_at` and `raw_name`. |
 | `button` | Action 1 | Pulses output 1 of the monitor (unlock output). |
 | `button` | Action 2 | Pulses output 2 of the monitor (option output). |
 | `camera` | Camera | Image and live view of the entrance station chosen in the options. |

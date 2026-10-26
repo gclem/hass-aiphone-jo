@@ -2,6 +2,17 @@
 
 All notable changes to this integration.
 
+## Unreleased
+
+- Entrance stations that keep their factory default Japanese name (such as
+  `玄関1`) are shown translated, for example **Entrance 1** in English or
+  **Entrée 1** in French, in the options, the ring event and the last ringing
+  station sensor. Custom names are unchanged. The name returned by the Aiphone
+  service is available in the new `raw_name` attribute.
+- Pairing: when the monitor ends the "add smartphone" mode while the
+  certificate is being checked, the approval is kept and the pairing can be
+  resumed, instead of failing with an unknown error.
+
 ## 0.3.0
 
 - New camera entity, through go2rtc: WebRTC live view with sound (about one

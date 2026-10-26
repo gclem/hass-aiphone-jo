@@ -8,7 +8,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import AiphoneJoConfigEntry
-from .const import EVENT_RING
+from .const import ATTR_RAW_NAME, EVENT_RING
 from .coordinator import Ring, signal_ring
 from .entity import AiphoneJoEntity
 
@@ -39,5 +39,6 @@ class AiphoneJoRingEvent(AiphoneJoEntity, EventEntity):
 
     @callback
     def _handle_ring(self, ring: Ring) -> None:
-        self._trigger_event(EVENT_RING, {"station": ring.station})
+        label = self.runtime.station_label(ring.station)
+        self._trigger_event(EVENT_RING, {"station": label, ATTR_RAW_NAME: ring.station})
         self.async_write_ha_state()

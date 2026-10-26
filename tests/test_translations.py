@@ -61,3 +61,12 @@ def test_languages_are_in_sync() -> None:
     assert keys(_strings("translations/en.json")) == keys(
         _strings("translations/fr.json")
     )
+
+
+def test_station_label_is_translated() -> None:
+    """The entrance station label exists in every language with its placeholder."""
+    from custom_components.aiphone_jo.names import STATION_ENTRANCE_KEY
+
+    for name in ("strings.json", "translations/en.json", "translations/fr.json"):
+        message = _strings(name)["exceptions"][STATION_ENTRANCE_KEY]["message"]
+        assert "{number}" in message, name

@@ -63,6 +63,7 @@ from .const import (
 )
 from .errors import REASON_KEYS, FlowError, flow_error
 from .go2rtc import Go2RtcError, async_check_server, async_get_server
+from .names import async_get_station_namer
 from .notify import async_notify_manual_removal
 from .vendor.aiphone_jo import (
     AiphoneJoError,
@@ -325,7 +326,13 @@ class AiphoneJoConfigFlow(ConfigFlow, domain=DOMAIN):
             )
         if not user_input[CONF_TRUST] or self._peer is None:
             return self.async_abort(reason="fingerprint_rejected")
-        pairing.approve(self._peer.fingerprint)
+        try:
+            pairing.approve(self._peer.fingerprint)
+        except AiphoneJoError as err:
+            # The monitor closed the link while the fingerprint was displayed:
+            # keep the approval and resume on a new connection.
+            self._expected_fingerprint = normalize_fingerprint(self._peer.fingerprint)
+            return self._resume_form(flow_error(err))
         return await self.async_step_code()
 
     def _peer_placeholders(self, peer: PeerCertificate | None) -> dict[str, str]:
@@ -452,10 +459,18 @@ class AiphoneJoConfigFlow(ConfigFlow, domain=DOMAIN):
             return self._resume_form()
         pairing = self._pairing_flow()
         try:
-            await pairing.reconnect()
+            if pairing.approved_fingerprint is None and self._expected_fingerprint:
+                assert self._monitor is not None
+                await pairing.connect(
+                    self._monitor, expected_fingerprint=self._expected_fingerprint
+                )
+            else:
+                await pairing.reconnect()
         except UntrustedPeerError as err:
             self._peer = err.peer
-            self._expected_fingerprint = pairing.approved_fingerprint
+            self._expected_fingerprint = (
+                pairing.approved_fingerprint or self._expected_fingerprint
+            )
             return await self.async_step_fingerprint_changed()
         except AiphoneJoError as err:
             return self._resume_form(flow_error(err))
@@ -587,8 +602,9 @@ class AiphoneJoOptionsFlow(OptionsFlow):
             current = {**current, **options}
         schema: dict[Any, Any] = {}
         if stations:
+            label = await async_get_station_namer(self.hass)
             choices = [
-                SelectOptionDict(value=str(s.id), label=s.name) for s in stations
+                SelectOptionDict(value=str(s.id), label=label(s.name)) for s in stations
             ]
             default = str(current.get(CONF_STATION, stations[0].id))
             schema[vol.Required(CONF_STATION, default=default)] = SelectSelector(

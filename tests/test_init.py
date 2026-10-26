@@ -170,6 +170,7 @@ async def test_ring(
     event = hass.states.get(EVENT)
     assert event.attributes["event_type"] == "ring"
     assert event.attributes["station"] == "Back"
+    assert event.attributes["raw_name"] == "Back"
     assert event.attributes["device_class"] == "doorbell"
     assert hass.states.get(RINGING).state == STATE_ON
     last = hass.states.get(LAST_STATION)
@@ -210,6 +211,88 @@ async def test_last_station_restored(
     state = hass.states.get(LAST_STATION)
     assert state.state == "Front"
     assert state.attributes["rang_at"] == "2026-01-01T08:00:00+00:00"
+    assert state.attributes["raw_name"] == "Front"
+
+
+def _default_names(client: FakeClient) -> None:
+    client.get_room_info.return_value = RoomInfo(
+        terminals=(
+            Terminal(id=101, term_kind=5, name="玄関1", camera=True, ent_key_type=None),
+            Terminal(id=102, term_kind=5, name="玄関2", camera=True, ent_key_type=None),
+        ),
+        term_inf_num=2,
+    )
+
+
+@pytest.mark.parametrize(
+    ("language", "label"), [("en", "Entrance 2"), ("fr", "Entrée 2")]
+)
+async def test_ring_default_station_name(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    language: str,
+    label: str,
+) -> None:
+    """Factory default station names are translated; the raw name is kept."""
+    hass.config.language = language
+    client_holder.setup = _default_names
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    _client(client_holder).emit(RingEvent(_call(102)))
+    await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+    unique_id = config_entry.unique_id
+    event = hass.states.get(
+        registry.async_get_entity_id("event", DOMAIN, f"{unique_id}_ring")
+    )
+    assert event.attributes["station"] == label
+    assert event.attributes["raw_name"] == "玄関2"
+    last = hass.states.get(
+        registry.async_get_entity_id("sensor", DOMAIN, f"{unique_id}_last_station")
+    )
+    assert last.state == label
+    assert last.attributes["raw_name"] == "玄関2"
+
+
+@pytest.mark.parametrize(
+    ("state", "attributes", "expected"),
+    [
+        ("玄関1", {}, "Entrée 1"),
+        ("Entrance 1", {"raw_name": "玄関1"}, "Entrée 1"),
+        ("Front", {"raw_name": "Front"}, "Front"),
+    ],
+)
+async def test_last_station_restored_translated(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    state: str,
+    attributes: dict[str, str],
+    expected: str,
+) -> None:
+    """A restored station name follows the current language."""
+    hass.config.language = "fr"
+    er.async_get(hass).async_get_or_create(
+        "sensor",
+        DOMAIN,
+        f"{config_entry.unique_id}_last_station",
+        suggested_object_id=LAST_STATION.split(".")[1],
+        config_entry=config_entry,
+    )
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State(LAST_STATION, state, attributes),
+                {"native_value": state, "native_unit_of_measurement": None},
+            )
+        ],
+    )
+    await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(LAST_STATION).state == expected
 
 
 async def test_availability(

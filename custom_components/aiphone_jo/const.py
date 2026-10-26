@@ -50,6 +50,8 @@ MAX_TERMINAL_NAME: Final = 12
 RING_TIMEOUT: Final = 60.0
 
 EVENT_RING: Final = "ring"
+# Station name as returned by the Aiphone service (state attribute).
+ATTR_RAW_NAME: Final = "raw_name"
 
 # Keys that must never leave the config entry: always redacted from diagnostics
 # and never logged. Extend this set whenever a new sensitive field is stored.

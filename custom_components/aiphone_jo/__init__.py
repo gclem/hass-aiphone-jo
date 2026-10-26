@@ -23,6 +23,7 @@ from .api import (
 from .const import CONF_CREDENTIALS, CONF_STATIONS, DOMAIN, RING_TIMEOUT
 from .coordinator import AiphoneJoRuntime
 from .media import ISSUES
+from .names import async_get_station_namer
 from .notify import async_notify_manual_removal
 from .vendor.aiphone_jo import (
     AiphoneJoClient,
@@ -87,7 +88,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: AiphoneJoConfigEntry) ->
                 data={**entry.data, CONF_STATIONS: [s.as_dict() for s in fresh]},
             )
 
-    entry.runtime_data = AiphoneJoRuntime(hass, entry, client, stations)
+    namer = await async_get_station_namer(hass)
+    entry.runtime_data = AiphoneJoRuntime(hass, entry, client, stations, namer)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True

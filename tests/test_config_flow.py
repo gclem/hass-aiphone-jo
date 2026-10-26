@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -32,8 +33,11 @@ from custom_components.aiphone_jo.vendor.aiphone_jo import (
     PairingCloudError,
     PairingError,
     PairingFailureReason,
+    PairingFlow,
     PairingTimeoutError,
+    PeerCertificate,
     ProtocolError,
+    UntrustedPeerError,
 )
 
 from .conftest import (
@@ -457,6 +461,107 @@ async def test_window_closed_then_resume(
     assert pairing.calls.count("approve") == 1
 
 
+async def test_window_closed_while_checking_fingerprint(
+    hass: HomeAssistant, pairing: FakePairing
+) -> None:
+    """The link closes while the fingerprint is displayed: resume, no error."""
+    result = await _configure(hass, await _start(hass), {"method": "discover"})
+    assert result["step_id"] == "confirm_fingerprint"
+    pairing.connected = False
+
+    result = await _configure(hass, result, {"trust": True})
+    assert result["step_id"] == "pairing_window_closed"
+    assert _error(result) == "link_closed"
+
+    result = await _finish(hass, result)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].data[CONF_MONITOR][CONF_FINGERPRINT] == FINGERPRINT_ID
+    assert pairing.calls.count("connect") == 2
+    assert "reconnect" not in pairing.calls
+
+
+async def test_window_closed_while_checking_fingerprint_then_changed(
+    hass: HomeAssistant, pairing: FakePairing
+) -> None:
+    """A different certificate on the new connection must be approved again."""
+    result = await _configure(hass, await _start(hass), {"method": "discover"})
+    pairing.connected = False
+    result = await _configure(hass, result, {"trust": True})
+    assert result["step_id"] == "pairing_window_closed"
+
+    pairing.peer = peer(OTHER_FINGERPRINT)
+    result = await _configure(hass, result)
+    assert result["step_id"] == "fingerprint_changed"
+    assert result["description_placeholders"]["previous"] == ":".join(["AB"] * 32)
+    assert result["description_placeholders"]["fingerprint"] == OTHER_FINGERPRINT
+
+    result = await _configure(hass, result, {"trust": True})
+    assert result["step_id"] == "code"
+    result = await _configure(hass, result, {"code": VALID_CODE})
+    result = await _configure(hass, result, {"terminal_name": "Hall"})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].data[CONF_MONITOR][CONF_FINGERPRINT] == "cd" * 32
+
+
+class _ClosingLink:
+    """Local link of a monitor that can close the connection at any time."""
+
+    def __init__(self) -> None:
+        self.on_disconnect: Callable[[], None] | None = None
+        self.connected = False
+
+    async def connect(
+        self,
+        host: str,
+        port: int,
+        *,
+        decide: Callable[[PeerCertificate], bool],
+        **kwargs: Any,
+    ) -> PeerCertificate:
+        certificate = peer()
+        if not decide(certificate):
+            raise UntrustedPeerError("untrusted", peer=certificate)
+        self.connected = True
+        return certificate
+
+    async def request(
+        self, mid: str, payload: Any, response_mid: str, **kwargs: Any
+    ) -> dict[str, Any]:
+        return {"HEADER": {"MID": response_mid}, "BODY": {"RSLT": 0, "OTPASS": "x"}}
+
+    async def close(self) -> None:
+        self.connected = False
+
+
+async def test_window_closed_while_checking_fingerprint_library(
+    hass: HomeAssistant,
+) -> None:
+    """Same case with the library pairing flow: no unexpected error."""
+    link = _ClosingLink()
+    with (
+        patch(
+            "custom_components.aiphone_jo.config_flow.PairingFlow",
+            side_effect=lambda session: PairingFlow(session, link=link),
+        ),
+        patch(
+            "custom_components.aiphone_jo.config_flow.async_discover",
+            AsyncMock(return_value=[MONITOR]),
+        ),
+    ):
+        result = await _configure(hass, await _start(hass), {"method": "discover"})
+        assert result["step_id"] == "confirm_fingerprint"
+        link.connected = False
+
+        result = await _configure(hass, result, {"trust": True})
+        assert result["step_id"] == "pairing_window_closed"
+        assert _error(result) == "link_closed"
+        assert "PairingLinkClosedError" in result["description_placeholders"]["code"]
+
+        result = await _configure(hass, result)
+        assert result["step_id"] == "code"
+        assert link.connected
+
+
 async def test_timeout(hass: HomeAssistant, pairing: FakePairing) -> None:
     """A monitor timeout leads to the resume step with an explanation."""
     pairing.fail("request_code", PairingTimeoutError("late", mid="11002"))
@@ -628,6 +733,32 @@ async def test_options(hass: HomeAssistant, config_entry: MockConfigEntry) -> No
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert config_entry.options == {CONF_STATION: 102, CONF_IMAGE_REFRESH: 120}
+
+
+@pytest.mark.parametrize(
+    ("language", "labels"),
+    [("en", ["Entrance 1", "Garden"]), ("fr", ["Entrée 1", "Garden"])],
+)
+async def test_options_default_station_names(
+    hass: HomeAssistant,
+    credentials: CloudCredentials,
+    language: str,
+    labels: list[str],
+) -> None:
+    """Factory default station names are translated, custom names kept."""
+    hass.config.language = language
+    stations = [
+        {"id": 101, "kind": 5, "name": "玄関1", "camera": True},
+        {"id": 102, "kind": 5, "name": "Garden", "camera": True},
+    ]
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={**entry_data(credentials), CONF_STATIONS: stations}
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    selector = result["data_schema"].schema[CONF_STATION]
+    assert [o["label"] for o in selector.config["options"]] == labels
+    assert [o["value"] for o in selector.config["options"]] == ["101", "102"]
 
 
 @pytest.mark.parametrize("value", [9, 3601])

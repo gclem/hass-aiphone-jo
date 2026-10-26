@@ -160,6 +160,9 @@
           },
           "station": {
             "name": "Entrance station"
+          },
+          "raw_name": {
+            "name": "Original name"
           }
         }
       }
@@ -170,6 +173,9 @@
         "state_attributes": {
           "rang_at": {
             "name": "Rang at"
+          },
+          "raw_name": {
+            "name": "Original name"
           }
         }
       }
@@ -216,6 +222,9 @@
     },
     "auth_refused": {
       "message": "The Aiphone service no longer accepts this terminal (it may have been deleted from the monitor). Pair the monitor again."
+    },
+    "station_entrance": {
+      "message": "Entrance {number}"
     }
   },
   "issues": {

@@ -160,6 +160,9 @@
           },
           "station": {
             "name": "Platine de rue"
+          },
+          "raw_name": {
+            "name": "Nom d'origine"
           }
         }
       }
@@ -170,6 +173,9 @@
         "state_attributes": {
           "rang_at": {
             "name": "Heure de la sonnerie"
+          },
+          "raw_name": {
+            "name": "Nom d'origine"
           }
         }
       }
@@ -216,6 +222,9 @@
     },
     "auth_refused": {
       "message": "Le service Aiphone n'accepte plus ce terminal (il a peut-être été supprimé du moniteur). Appairez à nouveau le moniteur."
+    },
+    "station_entrance": {
+      "message": "Entrée {number}"
     }
   },
   "issues": {

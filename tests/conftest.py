@@ -215,7 +215,10 @@ class FakePairing:
         return self.peer
 
     def approve(self, fingerprint: str) -> None:
-        self.calls.append("approve")
+        self._maybe_fail("approve")
+        if not self.connected:
+            # As the library: the monitor closed the link before the approval.
+            raise link_closed()
         self.approved_fingerprint = fingerprint
         self.step = PairingStep.CONNECTED
 

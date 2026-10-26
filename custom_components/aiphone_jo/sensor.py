@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import AiphoneJoConfigEntry
+from .const import ATTR_RAW_NAME
 from .entity import AiphoneJoEntity
 
 ATTR_RANG_AT = "rang_at"
@@ -37,15 +38,25 @@ class AiphoneJoLastStationSensor(AiphoneJoEntity, RestoreSensor):
             self._restored_value = str(value) if value is not None else None
         if (state := await self.async_get_last_state()) is not None:
             self._restored_at = state.attributes.get(ATTR_RANG_AT)
+            if raw := state.attributes.get(ATTR_RAW_NAME):
+                self._restored_value = str(raw)
 
     @property
-    def native_value(self) -> str | None:
-        """Station name."""
+    def _raw_name(self) -> str | None:
         ring = self.runtime.last_ring
         return ring.station if ring else self._restored_value
 
     @property
+    def native_value(self) -> str | None:
+        """Station name, translated when it is a factory default name."""
+        raw = self._raw_name
+        return self.runtime.station_label(raw) if raw is not None else None
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Time of the last ring."""
+        """Time of the last ring and station name from the Aiphone service."""
         ring = self.runtime.last_ring
-        return {ATTR_RANG_AT: ring.at.isoformat() if ring else self._restored_at}
+        return {
+            ATTR_RANG_AT: ring.at.isoformat() if ring else self._restored_at,
+            ATTR_RAW_NAME: self._raw_name,
+        }
