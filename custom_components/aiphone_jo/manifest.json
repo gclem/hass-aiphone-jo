@@ -1,6 +1,9 @@
 {
   "domain": "aiphone_jo",
   "name": "Aiphone JO",
+  "after_dependencies": [
+    "go2rtc"
+  ],
   "codeowners": [
     "@gclem"
   ],

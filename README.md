@@ -32,7 +32,7 @@ The integration ships with its own copy of the library.
 - **Action 1** and **Action 2** buttons, which trigger the monitor's two
   outputs.
 - **Camera**: still image of an entrance station, refreshed while it is
-  displayed, and a live view.
+  displayed, and a WebRTC live view with sound, through go2rtc.
 
 See the [roadmap](ROADMAP.md) for upcoming features.
 
@@ -62,23 +62,29 @@ or monitoring in progress), the other camera stations are tried.
 
 ### Camera
 
-The camera shows the entrance station chosen in the options.
+The camera shows the entrance station chosen in the options. It relies on
+[go2rtc](https://github.com/AlexxIT/go2rtc), which Home Assistant runs itself
+on Home Assistant OS and Container installations (go2rtc integration, part of
+the default configuration). On a Home Assistant Core installation, or to use
+another go2rtc server (1.9.15 or later), enter its URL in the options.
 
+- **Live view** (WebRTC, video and sound): opening the camera starts a
+  monitoring session on the entrance station. The station ends each session
+  after **about 60 seconds**; the live view then stops and can be opened
+  again. Several viewers share the same session, which also stops when the
+  last viewer closes it.
 - **Still image**: refreshed only while it is displayed (for example on a
   dashboard card), at most once per refresh interval (30 seconds by default,
   configurable from 10 to 3600 seconds in the options). Otherwise the last
-  image is kept.
-- **Live view**: opening the camera shows a live MJPEG view. Several viewers
-  share the same stream, which stops when the last one closes it.
+  image is kept. While a live view runs, images come from it.
 
 Each image or live view opens a monitoring session on the entrance station.
 Depending on the installation, this may turn on the monitor screen or the
-station's LED or lighting, and keeps the station briefly busy. There is no
-audio. A live view relies on a monitoring session that is renewed
-automatically about every minute, which may cause a short interruption.
+station's LED or lighting, and keeps the station briefly busy. The output
+buttons keep working during a live view.
 
-If video cannot work on your system, the camera is unavailable and a repair
-notice explains why; the other entities keep working.
+If go2rtc cannot be reached, the camera is unavailable and a repair notice
+explains what to do; the other entities keep working.
 
 Entities become unavailable while the cloud connection is down; the
 integration reconnects automatically.
@@ -141,7 +147,9 @@ Every error message says what to do. The most common cases:
 
 - the entrance station used for the output buttons and the camera (the first
   camera station by default);
-- the camera image refresh interval (30 seconds by default, 10 to 3600).
+- the camera image refresh interval (30 seconds by default, 10 to 3600);
+- the URL of a go2rtc server, with optional credentials, when Home Assistant
+  does not run go2rtc itself (Home Assistant Core installations).
 
 Changes apply immediately, without restarting Home Assistant.
 
@@ -167,7 +175,8 @@ name to delete.
 - **Doorbell detection is experimental.** Ring events may be missed or
   delayed; please report whether they work with your installation.
 - Call answering, two-way audio and output status are not available yet.
-- The camera has no audio, and the live view is MJPEG only.
+- The live view lasts about 60 seconds per opening; continuous live view is
+  planned. Audio is one-way (from the entrance station).
 - The output buttons briefly open a monitoring session on an entrance station;
   the station may show it on its screen.
 - Unregistering the terminal when the integration is removed may not remove

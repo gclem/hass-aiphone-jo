@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import (
@@ -21,6 +22,7 @@ from .api import (
 )
 from .const import CONF_CREDENTIALS, CONF_STATIONS, DOMAIN, RING_TIMEOUT
 from .coordinator import AiphoneJoRuntime
+from .media import ISSUES
 from .notify import async_notify_manual_removal
 from .vendor.aiphone_jo import (
     AiphoneJoClient,
@@ -108,6 +110,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: AiphoneJoConfigEntry) -
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Unregister the terminal when the integration is removed."""
+    for issue in ISSUES:
+        ir.async_delete_issue(hass, DOMAIN, issue)
     removed = False
     try:
         credentials = credentials_from_storage(

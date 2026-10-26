@@ -40,6 +40,18 @@ pytest
 The integration contains no protocol logic: it relies on the library's public
 API for discovery, pairing, the cloud connection and commands.
 
+### Testing with go2rtc
+
+`tests/test_go2rtc_binary.py` exercises the bridge against a real go2rtc
+server (1.9.15 or later) configured like Home Assistant's
+(`tests/go2rtc.yaml`). It needs `aiortc`, and `ffmpeg` for still images:
+
+```bash
+go2rtc -config tests/go2rtc.yaml &
+pip install aiortc
+GO2RTC_URL=http://127.0.0.1:11984/ pytest tests/test_go2rtc_binary.py
+```
+
 ## Pull requests
 
 - Keep changes focused and add tests for new behaviour.

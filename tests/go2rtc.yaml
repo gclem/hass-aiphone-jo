@@ -1,0 +1,13 @@
+# Same modules, paths and WebRTC settings as the go2rtc run by Home Assistant.
+app:
+  modules: [api, exec, ffmpeg, http, mjpeg, onvif, rtmp, rtsp, srtp, webrtc, ws]
+api:
+  listen: "127.0.0.1:11984"
+  allow_paths: [/, /api, /api/frame.jpeg, /api/schemes, /api/streams, /api/webrtc, /api/ws]
+exec:
+  allow_paths: [ffmpeg]
+rtsp:
+  listen: "127.0.0.1:18554"
+webrtc:
+  listen: ":18555/tcp"
+  ice_servers: []

@@ -1,16 +1,19 @@
-"""Camera of the entrance stations (cached images and MJPEG live view)."""
+"""Camera of the entrance stations: still images and WebRTC live view."""
 
 from __future__ import annotations
 
-from aiohttp import web
-from homeassistant.components.camera import Camera, async_get_still_stream
-from homeassistant.core import HomeAssistant
+from homeassistant.components.camera import (
+    Camera,
+    CameraEntityFeature,
+    WebRTCSendMessage,
+)
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from webrtc_models import RTCIceCandidateInit
 
 from . import AiphoneJoConfigEntry
 from .coordinator import AiphoneJoRuntime
 from .entity import AiphoneJoEntity
-from .media import STREAM_FPS
 
 
 async def async_setup_entry(
@@ -20,15 +23,14 @@ async def async_setup_entry(
 ) -> None:
     """Set up the camera."""
     runtime = entry.runtime_data
-    if not runtime.media.available and runtime.media.unavailable_reason:
-        runtime.media.report_unavailable(runtime.media.unavailable_reason)
+    runtime.media.async_update_issues()
     async_add_entities([AiphoneJoCamera(runtime)])
 
 
 class AiphoneJoCamera(AiphoneJoEntity, Camera):
-    """Image and live video of the entrance station chosen in the options."""
+    """Entrance station chosen in the options."""
 
-    _attr_frame_interval = 1 / STREAM_FPS
+    _attr_supported_features = CameraEntityFeature.STREAM
 
     def __init__(self, runtime: AiphoneJoRuntime) -> None:
         """Initialize."""
@@ -38,8 +40,13 @@ class AiphoneJoCamera(AiphoneJoEntity, Camera):
 
     @property
     def available(self) -> bool:
-        """Available while connected and video is supported."""
+        """Available while connected and video can work."""
         return super().available and self.runtime.media.available
+
+    @property
+    def is_streaming(self) -> bool:
+        """True while a live session runs."""
+        return self.runtime.media.live
 
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
@@ -47,14 +54,19 @@ class AiphoneJoCamera(AiphoneJoEntity, Camera):
         """Cached image, refreshed at most once per refresh interval."""
         return await self.runtime.media.async_image()
 
-    async def handle_async_mjpeg_stream(
-        self, request: web.Request
-    ) -> web.StreamResponse | None:
-        """Live view, shared with other viewers, stopped when they leave."""
-        media = self.runtime.media
-        if not media.available:
-            return None
-        async with media.async_subscribe() as next_frame:
-            return await async_get_still_stream(
-                request, next_frame, self.content_type, self.frame_interval
-            )
+    async def async_handle_async_webrtc_offer(
+        self, offer_sdp: str, session_id: str, send_message: WebRTCSendMessage
+    ) -> None:
+        """Start (or join) the live session and connect the browser."""
+        await self.runtime.media.async_open_viewer(session_id, offer_sdp, send_message)
+
+    async def async_on_webrtc_candidate(
+        self, session_id: str, candidate: RTCIceCandidateInit
+    ) -> None:
+        """Forward a browser ICE candidate."""
+        await self.runtime.media.async_viewer_candidate(session_id, candidate.candidate)
+
+    @callback
+    def close_webrtc_session(self, session_id: str) -> None:
+        """The browser left: stop the session with the last viewer."""
+        self.hass.async_create_task(self.runtime.media.async_close_viewer(session_id))

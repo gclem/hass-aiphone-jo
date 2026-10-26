@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
-from collections.abc import AsyncIterator, Callable, Generator
+from collections.abc import AsyncIterator, Awaitable, Callable, Generator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -41,6 +40,8 @@ from custom_components.aiphone_jo.vendor.aiphone_jo import (
     UntrustedPeerError,
     pairing_reason,
 )
+
+from .fake_go2rtc import JANUS_OFFER, FakeGo2Rtc
 
 FINGERPRINT = ":".join(["AB"] * 32)
 FINGERPRINT_ID = "ab" * 32
@@ -283,17 +284,41 @@ def pairing(credentials: CloudCredentials) -> Generator[FakePairing]:
         yield fake
 
 
-class FakeStream:
-    """Live stream returning numbered JPEG frames."""
+class FakeLive:
+    """Stand-in for LiveMonitor: negotiates once, then runs until closed."""
 
-    def __init__(self) -> None:
-        self.count = 0
-        self.open = False
-        self.closed = asyncio.Event()
+    def __init__(
+        self,
+        client: FakeClient,
+        negotiate: Callable[[str], Awaitable[str]],
+        terminal: int | None,
+        renew: bool,
+    ) -> None:
+        self.client = client
+        self.negotiate = negotiate
+        self.terminal = terminal
+        self.renew = renew
+        self.session: object | None = None
+        self.answer: str | None = None
+        self.exited = asyncio.Event()
 
-    def latest_jpeg(self, quality: int = 80) -> bytes | None:
-        self.count += 1
-        return f"frame-{self.count}".encode()
+    async def __aenter__(self) -> FakeLive:
+        self.client.lives.append(self)
+        if self.client.gate is not None:
+            await self.client.gate.wait()
+        if error := self.client.live_errors.get(self.terminal):
+            raise error
+        self.answer = await self.negotiate(JANUS_OFFER)
+        self.session = object()
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self.session = None
+        self.exited.set()
+
+    def end(self) -> None:
+        """The entrance station ends the session."""
+        self.session = None
 
 
 class FakeClient:
@@ -310,25 +335,20 @@ class FakeClient:
         self.disconnect = AsyncMock()
         self.open_door = AsyncMock()
         self.get_room_info = AsyncMock(return_value=ROOM_INFO)
-        self.snapshot = AsyncMock(return_value=b"jpeg-snapshot")
-        self.stream = FakeStream()
-        self.stream_terminals: list[int] = []
-        self.stream_error: BaseException | None = None
+        self.lives: list[FakeLive] = []
+        self.live_errors: dict[int | None, BaseException] = {}
+        self.gate: asyncio.Event | None = None
+        self.live_monitor = self._live_monitor
 
-    @contextlib.asynccontextmanager
-    async def video_stream(
-        self, terminal: int | None = None
-    ) -> AsyncIterator[FakeStream]:
-        self.stream_terminals.append(terminal)  # type: ignore[arg-type]
-        if self.stream_error is not None:
-            raise self.stream_error
-        self.stream.open = True
-        self.stream.closed.clear()
-        try:
-            yield self.stream
-        finally:
-            self.stream.open = False
-            self.stream.closed.set()
+    def _live_monitor(
+        self,
+        negotiate: Callable[[str], Awaitable[str]],
+        terminal: int | None = None,
+        *,
+        on_session_end: Callable[[], Awaitable[None]] | None = None,
+        renew: bool = True,
+    ) -> FakeLive:
+        return FakeLive(self, negotiate, terminal, renew)
 
     async def _connect(self) -> None:
         self.connected = True
@@ -383,3 +403,30 @@ def link_closed() -> Exception:
     from custom_components.aiphone_jo.vendor.aiphone_jo import PairingLinkClosedError
 
     return PairingLinkClosedError("The monitor closed the pairing connection.")
+
+
+@pytest.fixture
+async def go2rtc(
+    hass: HomeAssistant, socket_enabled: None
+) -> AsyncIterator[FakeGo2Rtc]:
+    """Fake go2rtc server registered as Home Assistant's go2rtc."""
+    from types import SimpleNamespace
+
+    from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+    server = FakeGo2Rtc()
+    url = await server.start()
+    hass.data["go2rtc"] = SimpleNamespace(
+        url=url, session=async_get_clientsession(hass)
+    )
+    yield server
+    await server.stop()
+
+
+async def until(predicate: Callable[[], bool], limit: float = 5) -> None:
+    """Wait until ``predicate()`` is true."""
+    async with asyncio.timeout(limit):
+        while True:
+            if predicate():
+                return
+            await asyncio.sleep(0.01)

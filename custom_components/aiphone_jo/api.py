@@ -21,17 +21,6 @@ from .vendor.aiphone_jo import (
     unregister,
 )
 
-try:
-    from .vendor.aiphone_jo import MediaTimeoutError, MediaUnavailableError
-except ImportError:  # Bundled library without video support.
-
-    class MediaUnavailableError(AiphoneJoError):  # type: ignore[no-redef]
-        """Video is not available."""
-
-    class MediaTimeoutError(AiphoneJoError):  # type: ignore[no-redef]
-        """No image was received in time."""
-
-
 _LOGGER = logging.getLogger(__name__)
 
 LIMITED_BROADCAST = "255.255.255.255"

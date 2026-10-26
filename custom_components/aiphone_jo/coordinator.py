@@ -83,7 +83,7 @@ class AiphoneJoRuntime:
     async def async_stop(self) -> None:
         """Stop listening and disconnect."""
         self._remove_listener()
-        await self.media.async_stop()
+        await self.media.async_shutdown()
         await self.client.disconnect()
 
     def station_name(self, call: IncomingCall) -> str:

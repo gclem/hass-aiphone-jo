@@ -37,6 +37,9 @@ CONF_TERMINAL_NAME: Final = "terminal_name"
 # Options (entry.options).
 CONF_STATION: Final = "station"
 CONF_IMAGE_REFRESH: Final = "image_refresh_interval"
+CONF_GO2RTC_URL: Final = "go2rtc_url"
+CONF_GO2RTC_USERNAME: Final = "go2rtc_username"
+CONF_GO2RTC_PASSWORD: Final = "go2rtc_password"
 
 DEFAULT_IMAGE_REFRESH: Final = 30
 MIN_IMAGE_REFRESH: Final = 10
@@ -59,6 +62,9 @@ TO_REDACT: Final = frozenset(
         CONF_CLIENT_SECRET,
         CONF_EMAIL,
         CONF_FINGERPRINT,
+        CONF_GO2RTC_PASSWORD,
+        CONF_GO2RTC_URL,
+        CONF_GO2RTC_USERNAME,
         CONF_HOST,
         CONF_IP_ADDRESS,
         CONF_MAC,

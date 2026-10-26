@@ -108,15 +108,23 @@
     "step": {
       "init": {
         "title": "Options",
-        "description": "The output buttons and the camera use a short monitoring session carried by an entrance station. If it is busy, the other stations are tried.",
+        "description": "The output buttons and the camera use a short monitoring session carried by an entrance station. If it is busy, the other stations are tried. The camera needs go2rtc.",
         "data": {
           "station": "Preferred entrance station",
-          "image_refresh_interval": "Camera image refresh interval"
+          "image_refresh_interval": "Camera image refresh interval",
+          "go2rtc_url": "go2rtc URL (optional)",
+          "go2rtc_username": "go2rtc username (optional)",
+          "go2rtc_password": "go2rtc password (optional)"
         },
         "data_description": {
-          "image_refresh_interval": "Minimum time between two camera images (10 to 3600 seconds). The image is only refreshed while it is displayed, and each refresh opens a monitoring session on the entrance station."
+          "image_refresh_interval": "Minimum time between two camera images (10 to 3600 seconds). The image is only refreshed while it is displayed, and each refresh opens a monitoring session on the entrance station.",
+          "go2rtc_url": "Leave empty to use the go2rtc server run by Home Assistant (Home Assistant OS and Container). Set it for a Home Assistant Core installation or an external go2rtc, for example http://192.0.2.10:1984."
         }
       }
+    },
+    "error": {
+      "go2rtc_cannot_connect": "Cannot reach go2rtc at this URL. Check the address, the port and the credentials.",
+      "invalid_url": "Enter a URL starting with http:// or https://."
     }
   },
   "selector": {
@@ -211,9 +219,13 @@
     }
   },
   "issues": {
-    "video_unavailable": {
-      "title": "Aiphone JO camera unavailable",
-      "description": "The camera cannot show images: {reason}.\n\nThe rest of the integration keeps working. Update the integration, then restart Home Assistant; if the problem persists, open an issue with this message."
+    "go2rtc_unavailable": {
+      "title": "Aiphone JO camera needs go2rtc",
+      "description": "The camera uses go2rtc, which Home Assistant runs automatically on Home Assistant OS and Container installations when the go2rtc integration is loaded (it is part of the default configuration).\n\nOn a Home Assistant Core installation, or to use another go2rtc server, run go2rtc 1.9.15 or later and enter its URL in the Aiphone JO options. The other entities keep working."
+    },
+    "video_unsupported": {
+      "title": "Aiphone JO camera not available in this version",
+      "description": "This version of the integration cannot show the camera yet. Update the integration when a new version is available. The other entities keep working."
     }
   }
 }

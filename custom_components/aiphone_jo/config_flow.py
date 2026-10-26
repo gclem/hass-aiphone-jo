@@ -27,6 +27,8 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
     SelectSelectorMode,
     TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
 )
 
 from .api import (
@@ -42,6 +44,9 @@ from .api import (
 from .const import (
     CONF_CREDENTIALS,
     CONF_FINGERPRINT,
+    CONF_GO2RTC_PASSWORD,
+    CONF_GO2RTC_URL,
+    CONF_GO2RTC_USERNAME,
     CONF_IMAGE_REFRESH,
     CONF_MONITOR,
     CONF_STATION,
@@ -57,6 +62,7 @@ from .const import (
     MIN_IMAGE_REFRESH,
 )
 from .errors import REASON_KEYS, FlowError, flow_error
+from .go2rtc import Go2RtcError, async_check_server, async_get_server
 from .notify import async_notify_manual_removal
 from .vendor.aiphone_jo import (
     AiphoneJoError,
@@ -545,7 +551,7 @@ class AiphoneJoConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class AiphoneJoOptionsFlow(OptionsFlow):
-    """Entrance station used for sessions and camera image refresh interval."""
+    """Entrance station, camera image refresh interval and go2rtc server."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -554,12 +560,31 @@ class AiphoneJoOptionsFlow(OptionsFlow):
         stations = [
             Station.from_dict(item) for item in self.config_entry.data[CONF_STATIONS]
         ]
+        errors: dict[str, str] = {}
+        current: Mapping[str, Any] = self.config_entry.options
         if user_input is not None:
-            options = {CONF_IMAGE_REFRESH: int(user_input[CONF_IMAGE_REFRESH])}
+            options: dict[str, Any] = {
+                CONF_IMAGE_REFRESH: int(user_input[CONF_IMAGE_REFRESH])
+            }
             if CONF_STATION in user_input:
                 options[CONF_STATION] = int(user_input[CONF_STATION])
-            return self.async_create_entry(data=options)
-        current = self.config_entry.options
+            if url := str(user_input.get(CONF_GO2RTC_URL) or "").strip():
+                options[CONF_GO2RTC_URL] = url
+                for key in (CONF_GO2RTC_USERNAME, CONF_GO2RTC_PASSWORD):
+                    if value := user_input.get(key):
+                        options[key] = value
+                if not url.startswith(("http://", "https://")):
+                    errors[CONF_GO2RTC_URL] = "invalid_url"
+                else:
+                    server = async_get_server(self.hass, options)
+                    assert server is not None
+                    try:
+                        await async_check_server(server)
+                    except Go2RtcError:
+                        errors["base"] = "go2rtc_cannot_connect"
+            if not errors:
+                return self.async_create_entry(data=options)
+            current = {**current, **options}
         schema: dict[Any, Any] = {}
         if stations:
             choices = [
@@ -583,4 +608,21 @@ class AiphoneJoOptionsFlow(OptionsFlow):
                 unit_of_measurement="s",
             )
         )
-        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema))
+        for key, selector in (
+            (
+                CONF_GO2RTC_URL,
+                TextSelector(TextSelectorConfig(type=TextSelectorType.URL)),
+            ),
+            (CONF_GO2RTC_USERNAME, TextSelector()),
+            (
+                CONF_GO2RTC_PASSWORD,
+                TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
+            ),
+        ):
+            if current.get(key):
+                schema[vol.Optional(key, default=current[key])] = selector
+            else:
+                schema[vol.Optional(key)] = selector
+        return self.async_show_form(
+            step_id="init", data_schema=vol.Schema(schema), errors=errors
+        )

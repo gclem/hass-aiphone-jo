@@ -60,6 +60,45 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/check_requirements.py latest dev
 
+  go2rtc:
+    name: go2rtc bridge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Install test requirements, a WebRTC peer and ffmpeg
+        run: |
+          pip install -r requirements_test.txt aiortc
+          jq -r '.requirements[]' custom_components/aiphone_jo/manifest.json \
+            | xargs -r pip install
+          command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+      - name: Start go2rtc
+        env:
+          GO2RTC_VERSION: v1.9.15
+          GO2RTC_SHA256: 20b46c6910734cb05ecefb234066f36868ff19b42ba1418a7a32e13a3e035712
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/go2rtc" \
+            "https://github.com/AlexxIT/go2rtc/releases/download/$GO2RTC_VERSION/go2rtc_linux_amd64"
+          echo "$GO2RTC_SHA256  $RUNNER_TEMP/go2rtc" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/go2rtc"
+          "$RUNNER_TEMP/go2rtc" -config tests/go2rtc.yaml > "$RUNNER_TEMP/go2rtc.log" 2>&1 &
+          for _ in $(seq 1 20); do
+            curl -fs http://127.0.0.1:11984/api >/dev/null && exit 0
+            sleep 0.5
+          done
+          exit 1
+      - name: Test the bridge
+        env:
+          GO2RTC_URL: http://127.0.0.1:11984/
+        run: pytest tests/test_go2rtc_binary.py
+      - name: go2rtc log
+        if: failure()
+        run: cat "$RUNNER_TEMP/go2rtc.log"
+
   tests:
     name: Tests (pytest)
     runs-on: ubuntu-latest

@@ -14,6 +14,9 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.aiphone_jo.const import (
     CONF_CREDENTIALS,
     CONF_FINGERPRINT,
+    CONF_GO2RTC_PASSWORD,
+    CONF_GO2RTC_URL,
+    CONF_GO2RTC_USERNAME,
     CONF_IMAGE_REFRESH,
     CONF_MONITOR,
     CONF_STATION,
@@ -46,6 +49,7 @@ from .conftest import (
     peer,
     rejected,
 )
+from .fake_go2rtc import FakeGo2Rtc
 
 
 async def _start(hass: HomeAssistant) -> dict[str, Any]:
@@ -652,3 +656,37 @@ async def test_options_without_stations(
         result["flow_id"], {CONF_IMAGE_REFRESH: 60}
     )
     assert entry.options == {CONF_IMAGE_REFRESH: 60}
+
+
+async def test_options_go2rtc_url(
+    hass: HomeAssistant, config_entry: MockConfigEntry, go2rtc: FakeGo2Rtc
+) -> None:
+    """A go2rtc URL is checked before being saved."""
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    base = {CONF_STATION: "101", CONF_IMAGE_REFRESH: 30}
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {**base, CONF_GO2RTC_URL: "192.0.2.10:1984"}
+    )
+    assert result["errors"] == {CONF_GO2RTC_URL: "invalid_url"}
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {**base, CONF_GO2RTC_URL: "http://127.0.0.1:9"}
+    )
+    assert result["errors"] == {"base": "go2rtc_cannot_connect"}
+    url = hass.data["go2rtc"].url
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            **base,
+            CONF_GO2RTC_URL: url,
+            CONF_GO2RTC_USERNAME: "user",
+            CONF_GO2RTC_PASSWORD: "example-password",
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert config_entry.options == {
+        CONF_STATION: 101,
+        CONF_IMAGE_REFRESH: 30,
+        CONF_GO2RTC_URL: url,
+        CONF_GO2RTC_USERNAME: "user",
+        CONF_GO2RTC_PASSWORD: "example-password",
+    }

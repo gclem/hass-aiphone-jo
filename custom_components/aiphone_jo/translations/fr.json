@@ -108,15 +108,23 @@
     "step": {
       "init": {
         "title": "Options",
-        "description": "Les boutons de sortie et la caméra utilisent une courte session de surveillance portée par une platine de rue. Si elle est occupée, les autres platines sont essayées.",
+        "description": "Les boutons de sortie et la caméra utilisent une courte session de surveillance portée par une platine de rue. Si elle est occupée, les autres platines sont essayées. La caméra a besoin de go2rtc.",
         "data": {
           "station": "Platine de rue préférée",
-          "image_refresh_interval": "Intervalle de rafraîchissement de l'image"
+          "image_refresh_interval": "Intervalle de rafraîchissement de l'image",
+          "go2rtc_url": "URL de go2rtc (facultatif)",
+          "go2rtc_username": "Utilisateur go2rtc (facultatif)",
+          "go2rtc_password": "Mot de passe go2rtc (facultatif)"
         },
         "data_description": {
-          "image_refresh_interval": "Délai minimal entre deux images de la caméra (10 à 3600 secondes). L'image n'est rafraîchie que lorsqu'elle est affichée, et chaque rafraîchissement ouvre une session de surveillance sur la platine de rue."
+          "image_refresh_interval": "Délai minimal entre deux images de la caméra (10 à 3600 secondes). L'image n'est rafraîchie que lorsqu'elle est affichée, et chaque rafraîchissement ouvre une session de surveillance sur la platine de rue.",
+          "go2rtc_url": "Laissez vide pour utiliser le serveur go2rtc lancé par Home Assistant (Home Assistant OS et Container). Renseignez-la pour une installation Home Assistant Core ou un go2rtc externe, par exemple http://192.0.2.10:1984."
         }
       }
+    },
+    "error": {
+      "go2rtc_cannot_connect": "Impossible de joindre go2rtc à cette URL. Vérifiez l'adresse, le port et les identifiants.",
+      "invalid_url": "Saisissez une URL commençant par http:// ou https://."
     }
   },
   "selector": {
@@ -211,9 +219,13 @@
     }
   },
   "issues": {
-    "video_unavailable": {
-      "title": "Caméra Aiphone JO indisponible",
-      "description": "La caméra ne peut pas afficher d'image : {reason}.\n\nLe reste de l'intégration continue de fonctionner. Mettez l'intégration à jour, puis redémarrez Home Assistant ; si le problème persiste, ouvrez une issue avec ce message."
+    "go2rtc_unavailable": {
+      "title": "La caméra Aiphone JO a besoin de go2rtc",
+      "description": "La caméra utilise go2rtc, que Home Assistant lance automatiquement sur les installations Home Assistant OS et Container lorsque l'intégration go2rtc est chargée (elle fait partie de la configuration par défaut).\n\nSur une installation Home Assistant Core, ou pour utiliser un autre serveur go2rtc, lancez go2rtc 1.9.15 ou plus récent et saisissez son URL dans les options d'Aiphone JO. Les autres entités continuent de fonctionner."
+    },
+    "video_unsupported": {
+      "title": "Caméra Aiphone JO indisponible dans cette version",
+      "description": "Cette version de l'intégration ne peut pas encore afficher la caméra. Mettez l'intégration à jour dès qu'une nouvelle version est disponible. Les autres entités continuent de fonctionner."
     }
   }
 }
