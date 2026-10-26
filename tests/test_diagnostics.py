@@ -67,4 +67,5 @@ async def test_diagnostics_of_paired_monitor(
         "ring_topic_subscribed": True,
         "station_count": 2,
         "ringing": False,
+        "camera_available": True,
     }

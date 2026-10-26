@@ -9,13 +9,13 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from . import AiphoneJoConfigEntry
 from .coordinator import AiphoneJoRuntime
 from .entity import AiphoneJoEntity
-from .vendor.aiphone_jo import Gate
+from .vendor.aiphone_jo import Output
 
 # (translation key, unique id suffix, monitor output). The unique id suffixes
 # predate the current names and must not change: entities would be recreated.
-BUTTONS: tuple[tuple[str, str, Gate], ...] = (
-    ("action_1", "large_opening", Gate.MAIN),
-    ("action_2", "small_opening", Gate.OPTION),
+BUTTONS: tuple[tuple[str, str, Output], ...] = (
+    ("action_1", "large_opening", Output.UNLOCK),
+    ("action_2", "small_opening", Output.OPTION),
 )
 
 
@@ -36,7 +36,7 @@ class AiphoneJoOutputButton(AiphoneJoEntity, ButtonEntity):
     """Pulse one of the monitor's outputs (1: unlock, 2: option)."""
 
     def __init__(
-        self, runtime: AiphoneJoRuntime, key: str, unique_key: str, output: Gate
+        self, runtime: AiphoneJoRuntime, key: str, unique_key: str, output: Output
     ) -> None:
         """Initialize."""
         super().__init__(runtime, key, unique_key=unique_key)

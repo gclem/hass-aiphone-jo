@@ -107,15 +107,16 @@
   "options": {
     "step": {
       "init": {
-        "title": "Sorties du moniteur",
-        "description": "Les deux boutons de sortie passent par une courte session de surveillance portée par une platine de rue. Si elle est occupée, les autres platines sont essayées.",
+        "title": "Options",
+        "description": "Les boutons de sortie et la caméra utilisent une courte session de surveillance portée par une platine de rue. Si elle est occupée, les autres platines sont essayées.",
         "data": {
-          "station": "Platine de rue préférée"
+          "station": "Platine de rue préférée",
+          "image_refresh_interval": "Intervalle de rafraîchissement de l'image"
+        },
+        "data_description": {
+          "image_refresh_interval": "Délai minimal entre deux images de la caméra (10 à 3600 secondes). L'image n'est rafraîchie que lorsqu'elle est affichée, et chaque rafraîchissement ouvre une session de surveillance sur la platine de rue."
         }
       }
-    },
-    "abort": {
-      "no_stations": "Aucune platine de rue à caméra n'est encore connue. Rechargez l'intégration quand le cloud est joignable."
     }
   },
   "selector": {
@@ -164,6 +165,11 @@
           }
         }
       }
+    },
+    "camera": {
+      "camera": {
+        "name": "Caméra"
+      }
     }
   },
   "exceptions": {
@@ -202,6 +208,12 @@
     },
     "auth_refused": {
       "message": "Le service Aiphone n'accepte plus ce terminal (il a peut-être été supprimé du moniteur). Appairez à nouveau le moniteur."
+    }
+  },
+  "issues": {
+    "video_unavailable": {
+      "title": "Caméra Aiphone JO indisponible",
+      "description": "La caméra ne peut pas afficher d'image : {reason}.\n\nLe reste de l'intégration continue de fonctionner. Mettez l'intégration à jour, puis redémarrez Home Assistant ; si le problème persiste, ouvrez une issue avec ce message."
     }
   }
 }

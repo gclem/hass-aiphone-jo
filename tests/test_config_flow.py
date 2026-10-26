@@ -8,12 +8,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, InvalidData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.aiphone_jo.const import (
     CONF_CREDENTIALS,
     CONF_FINGERPRINT,
+    CONF_IMAGE_REFRESH,
     CONF_MONITOR,
     CONF_STATION,
     CONF_STATIONS,
@@ -616,21 +617,38 @@ async def test_options(hass: HomeAssistant, config_entry: MockConfigEntry) -> No
     """The station carrying the output session can be chosen."""
     result = await hass.config_entries.options.async_init(config_entry.entry_id)
     assert result["step_id"] == "init"
+    defaults = result["data_schema"]({})
+    assert defaults == {CONF_STATION: "101", CONF_IMAGE_REFRESH: 30}
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_STATION: "102"}
+        result["flow_id"], {CONF_STATION: "102", CONF_IMAGE_REFRESH: 120}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert config_entry.options == {CONF_STATION: 102}
+    assert config_entry.options == {CONF_STATION: 102, CONF_IMAGE_REFRESH: 120}
+
+
+@pytest.mark.parametrize("value", [9, 3601])
+async def test_options_refresh_bounds(
+    hass: HomeAssistant, config_entry: MockConfigEntry, value: int
+) -> None:
+    """The image refresh interval is bounded."""
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    with pytest.raises(InvalidData):
+        await hass.config_entries.options.async_configure(
+            result["flow_id"], {CONF_STATION: "101", CONF_IMAGE_REFRESH: value}
+        )
 
 
 async def test_options_without_stations(
     hass: HomeAssistant, credentials: CloudCredentials
 ) -> None:
-    """Options explain that stations are unknown."""
+    """Without known stations, only the refresh interval is offered."""
     entry = MockConfigEntry(
         domain=DOMAIN, data={**entry_data(credentials), CONF_STATIONS: []}
     )
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "no_stations"
+    assert result["data_schema"]({}) == {CONF_IMAGE_REFRESH: 30}
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_IMAGE_REFRESH: 60}
+    )
+    assert entry.options == {CONF_IMAGE_REFRESH: 60}

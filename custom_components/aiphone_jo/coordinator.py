@@ -14,6 +14,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .api import Station
 from .const import CONF_STATION, DOMAIN
+from .media import CameraMedia
 from .vendor.aiphone_jo import (
     AiphoneEvent,
     AiphoneJoClient,
@@ -21,9 +22,9 @@ from .vendor.aiphone_jo import (
     CallUpdatedEvent,
     CommandRejectedError,
     ConnectionStateEvent,
-    Gate,
     IncomingCall,
     NotConnectedError,
+    Output,
     ResponseTimeoutError,
     RingEvent,
     StationBusyError,
@@ -69,7 +70,9 @@ class AiphoneJoRuntime:
         self.ringing = False
         self.last_ring: Ring | None = None
         self._call: IncomingCall | None = None
-        self._output_lock = asyncio.Lock()
+        # One monitoring session at a time: outputs, images and live video.
+        self.session_lock = asyncio.Lock()
+        self.media = CameraMedia(hass, self)
         self._remove_listener = client.add_listener(self._handle_event)
 
     @property
@@ -80,6 +83,7 @@ class AiphoneJoRuntime:
     async def async_stop(self) -> None:
         """Stop listening and disconnect."""
         self._remove_listener()
+        await self.media.async_stop()
         await self.client.disconnect()
 
     def station_name(self, call: IncomingCall) -> str:
@@ -114,18 +118,19 @@ class AiphoneJoRuntime:
                 self.ringing = False
                 async_dispatcher_send(self.hass, signal_update(entry_id))
 
-    def _session_stations(self) -> list[Station]:
+    def session_stations(self) -> list[Station]:
+        """Camera stations, the one chosen in the options first."""
         preferred = self.entry.options.get(CONF_STATION)
         return sorted(self.stations, key=lambda station: station.id != preferred)
 
-    async def async_pulse(self, output: Gate) -> None:
+    async def async_pulse(self, output: Output) -> None:
         """Pulse a monitor output; one monitoring session at a time."""
-        stations = self._session_stations()
+        stations = self.session_stations()
         if not stations:
             raise HomeAssistantError(
                 translation_domain=DOMAIN, translation_key="no_station"
             )
-        async with self._output_lock:
+        async with self.session_lock:
             for station in stations:
                 try:
                     await self.client.open_door(output, station.id, station.kind)

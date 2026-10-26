@@ -36,6 +36,11 @@ CONF_SYSTEM_VERSION: Final = "system_version"
 CONF_TERMINAL_NAME: Final = "terminal_name"
 # Options (entry.options).
 CONF_STATION: Final = "station"
+CONF_IMAGE_REFRESH: Final = "image_refresh_interval"
+
+DEFAULT_IMAGE_REFRESH: Final = 30
+MIN_IMAGE_REFRESH: Final = 10
+MAX_IMAGE_REFRESH: Final = 3600
 
 DEFAULT_TERMINAL_NAME: Final = "HomeAssist"
 MAX_TERMINAL_NAME: Final = 12

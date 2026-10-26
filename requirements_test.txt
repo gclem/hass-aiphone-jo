@@ -1,1 +1,3 @@
 pytest-homeassistant-custom-component
+# Required by the Home Assistant camera component.
+PyTurboJPEG==1.8.0

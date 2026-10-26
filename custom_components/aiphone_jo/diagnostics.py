@@ -25,5 +25,6 @@ async def async_get_config_entry_diagnostics(
             "ring_topic_subscribed": runtime.client.broadcast_subscribed,
             "station_count": len(runtime.stations),
             "ringing": runtime.ringing,
+            "camera_available": runtime.media.available,
         }
     return diagnostics

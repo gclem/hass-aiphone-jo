@@ -37,7 +37,9 @@ def test_abort_and_exception_keys_are_translated() -> None:
     exceptions = set(re.findall(r'translation_key="(\w+)"', source))
     for name in ("strings.json", "translations/en.json", "translations/fr.json"):
         strings = _strings(name)
-        known = set(strings["config"]["abort"]) | set(strings["options"]["abort"])
+        known = set(strings["config"]["abort"]) | set(
+            strings["options"].get("abort", {})
+        )
         assert aborts <= known, name
         assert exceptions <= set(strings["exceptions"]), name
 

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
+import asyncio
+import contextlib
+from collections.abc import AsyncIterator, Callable, Generator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -281,6 +283,19 @@ def pairing(credentials: CloudCredentials) -> Generator[FakePairing]:
         yield fake
 
 
+class FakeStream:
+    """Live stream returning numbered JPEG frames."""
+
+    def __init__(self) -> None:
+        self.count = 0
+        self.open = False
+        self.closed = asyncio.Event()
+
+    def latest_jpeg(self, quality: int = 80) -> bytes | None:
+        self.count += 1
+        return f"frame-{self.count}".encode()
+
+
 class FakeClient:
     """Stand-in for AiphoneJoClient."""
 
@@ -295,6 +310,25 @@ class FakeClient:
         self.disconnect = AsyncMock()
         self.open_door = AsyncMock()
         self.get_room_info = AsyncMock(return_value=ROOM_INFO)
+        self.snapshot = AsyncMock(return_value=b"jpeg-snapshot")
+        self.stream = FakeStream()
+        self.stream_terminals: list[int] = []
+        self.stream_error: BaseException | None = None
+
+    @contextlib.asynccontextmanager
+    async def video_stream(
+        self, terminal: int | None = None
+    ) -> AsyncIterator[FakeStream]:
+        self.stream_terminals.append(terminal)  # type: ignore[arg-type]
+        if self.stream_error is not None:
+            raise self.stream_error
+        self.stream.open = True
+        self.stream.closed.clear()
+        try:
+            yield self.stream
+        finally:
+            self.stream.open = False
+            self.stream.closed.set()
 
     async def _connect(self) -> None:
         self.connected = True

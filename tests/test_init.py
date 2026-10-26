@@ -36,9 +36,9 @@ from custom_components.aiphone_jo.vendor.aiphone_jo import (
     CloudCredentials,
     CommandRejectedError,
     ConnectionStateEvent,
-    Gate,
     IncomingCall,
     NotConnectedError,
+    Output,
     RingEvent,
     RoomInfo,
     StationBusyError,
@@ -230,14 +230,14 @@ async def test_availability(
 
 
 @pytest.mark.parametrize(
-    ("entity_id", "output"), [(ACTION_1, Gate.MAIN), (ACTION_2, Gate.OPTION)]
+    ("entity_id", "output"), [(ACTION_1, Output.UNLOCK), (ACTION_2, Output.OPTION)]
 )
 async def test_buttons(
     hass: HomeAssistant,
     loaded_entry: MockConfigEntry,
     client_holder: ClientHolder,
     entity_id: str,
-    output: Gate,
+    output: Output,
 ) -> None:
     """Each button pulses its output through the first camera station."""
     await _press(hass, entity_id)
@@ -252,7 +252,7 @@ async def test_preferred_station(
     await hass.config_entries.async_setup(config_entry.entry_id)
     await hass.async_block_till_done()
     await _press(hass, ACTION_1)
-    _client(client_holder).open_door.assert_awaited_once_with(Gate.MAIN, 102, 5)
+    _client(client_holder).open_door.assert_awaited_once_with(Output.UNLOCK, 102, 5)
 
 
 async def test_options_change_reloads(
@@ -277,8 +277,8 @@ async def test_busy_station_fallback(
     ]
     await _press(hass, ACTION_1)
     assert [call.args for call in client.open_door.await_args_list] == [
-        (Gate.MAIN, 101, 5),
-        (Gate.MAIN, 102, 5),
+        (Output.UNLOCK, 101, 5),
+        (Output.UNLOCK, 102, 5),
     ]
 
 
@@ -509,7 +509,7 @@ async def test_migration_to_monitor_id(
     assert migrated.unique_id == f"{monitor_id}_ring"
     assert devices.async_get(device.id).identifiers == {(DOMAIN, monitor_id)}
     assert hass.states.get(ring.entity_id) is not None
-    assert len(er.async_entries_for_config_entry(entities, entry.entry_id)) == 5
+    assert len(er.async_entries_for_config_entry(entities, entry.entry_id)) == 6
 
 
 async def test_migration_with_unreadable_credentials(
@@ -571,4 +571,4 @@ async def test_existing_button_entities_are_kept(
     state = hass.states.get(old.entity_id)
     assert state.attributes["friendly_name"].endswith("Action 1")
     await _press(hass, old.entity_id)
-    _client(client_holder).open_door.assert_awaited_once_with(Gate.MAIN, 101, 5)
+    _client(client_holder).open_door.assert_awaited_once_with(Output.UNLOCK, 101, 5)

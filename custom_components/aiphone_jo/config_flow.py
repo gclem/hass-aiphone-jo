@@ -19,6 +19,9 @@ from homeassistant.const import CONF_ADDRESS, CONF_HOST, CONF_PORT
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -39,15 +42,19 @@ from .api import (
 from .const import (
     CONF_CREDENTIALS,
     CONF_FINGERPRINT,
+    CONF_IMAGE_REFRESH,
     CONF_MONITOR,
     CONF_STATION,
     CONF_STATIONS,
     CONF_SYSTEM_VERSION,
     CONF_TERMINAL_NAME,
+    DEFAULT_IMAGE_REFRESH,
     DEFAULT_TERMINAL_NAME,
     DEFAULT_TITLE,
     DOMAIN,
+    MAX_IMAGE_REFRESH,
     MAX_TERMINAL_NAME,
+    MIN_IMAGE_REFRESH,
 )
 from .errors import REASON_KEYS, FlowError, flow_error
 from .notify import async_notify_manual_removal
@@ -538,30 +545,42 @@ class AiphoneJoConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class AiphoneJoOptionsFlow(OptionsFlow):
-    """Choose the entrance station that carries the output session."""
+    """Entrance station used for sessions and camera image refresh interval."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Station choice."""
+        """Options form."""
         stations = [
             Station.from_dict(item) for item in self.config_entry.data[CONF_STATIONS]
         ]
-        if not stations:
-            return self.async_abort(reason="no_stations")
         if user_input is not None:
-            return self.async_create_entry(
-                data={CONF_STATION: int(user_input[CONF_STATION])}
+            options = {CONF_IMAGE_REFRESH: int(user_input[CONF_IMAGE_REFRESH])}
+            if CONF_STATION in user_input:
+                options[CONF_STATION] = int(user_input[CONF_STATION])
+            return self.async_create_entry(data=options)
+        current = self.config_entry.options
+        schema: dict[Any, Any] = {}
+        if stations:
+            choices = [
+                SelectOptionDict(value=str(s.id), label=s.name) for s in stations
+            ]
+            default = str(current.get(CONF_STATION, stations[0].id))
+            schema[vol.Required(CONF_STATION, default=default)] = SelectSelector(
+                SelectSelectorConfig(options=choices)
             )
-        current = self.config_entry.options.get(CONF_STATION, stations[0].id)
-        options = [SelectOptionDict(value=str(s.id), label=s.name) for s in stations]
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_STATION, default=str(current)): SelectSelector(
-                        SelectSelectorConfig(options=options)
-                    )
-                }
-            ),
+        schema[
+            vol.Required(
+                CONF_IMAGE_REFRESH,
+                default=current.get(CONF_IMAGE_REFRESH, DEFAULT_IMAGE_REFRESH),
+            )
+        ] = NumberSelector(
+            NumberSelectorConfig(
+                min=MIN_IMAGE_REFRESH,
+                max=MAX_IMAGE_REFRESH,
+                step=1,
+                mode=NumberSelectorMode.BOX,
+                unit_of_measurement="s",
+            )
         )
+        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema))

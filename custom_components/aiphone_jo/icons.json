@@ -20,6 +20,11 @@
       "last_station": {
         "default": "mdi:doorbell-video"
       }
+    },
+    "camera": {
+      "camera": {
+        "default": "mdi:doorbell-video"
+      }
     }
   }
 }

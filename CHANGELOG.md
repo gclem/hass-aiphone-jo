@@ -2,6 +2,12 @@
 
 All notable changes to this integration.
 
+## Unreleased
+
+- New camera entity: still image of the chosen entrance station, refreshed
+  only while displayed (interval configurable in the options, 30 seconds by
+  default), and a shared live MJPEG view.
+
 ## 0.2.2
 
 - The output buttons are now named **Action 1** (output 1, unlock) and

@@ -31,6 +31,8 @@ The integration ships with its own copy of the library.
 - **Ring** detection (call button pressed on an entrance station).
 - **Action 1** and **Action 2** buttons, which trigger the monitor's two
   outputs.
+- **Camera**: still image of an entrance station, refreshed while it is
+  displayed, and a live view.
 
 See the [roadmap](ROADMAP.md) for upcoming features.
 
@@ -45,6 +47,7 @@ All entities belong to one device, the monitor.
 | `sensor` | Last ringing station | Name of the station that rang last (kept across restarts), with `rang_at`. |
 | `button` | Action 1 | Pulses output 1 of the monitor (unlock output). |
 | `button` | Action 2 | Pulses output 2 of the monitor (option output). |
+| `camera` | Camera | Image and live view of the entrance station chosen in the options. |
 
 What each output does depends on your installation: a door strike, a gate
 motor, lighting or any other equipment wired to it. Rename the buttons in Home
@@ -56,6 +59,26 @@ commands during a short monitoring session: the integration opens one on an
 entrance station, sends the command and closes it immediately. One session
 runs at a time, so successive presses are queued. If the station is busy (call
 or monitoring in progress), the other camera stations are tried.
+
+### Camera
+
+The camera shows the entrance station chosen in the options.
+
+- **Still image**: refreshed only while it is displayed (for example on a
+  dashboard card), at most once per refresh interval (30 seconds by default,
+  configurable from 10 to 3600 seconds in the options). Otherwise the last
+  image is kept.
+- **Live view**: opening the camera shows a live MJPEG view. Several viewers
+  share the same stream, which stops when the last one closes it.
+
+Each image or live view opens a monitoring session on the entrance station.
+Depending on the installation, this may turn on the monitor screen or the
+station's LED or lighting, and keeps the station briefly busy. There is no
+audio. A live view relies on a monitoring session that is renewed
+automatically about every minute, which may cause a short interruption.
+
+If video cannot work on your system, the camera is unavailable and a repair
+notice explains why; the other entities keep working.
 
 Entities become unavailable while the cloud connection is down; the
 integration reconnects automatically.
@@ -114,8 +137,13 @@ Every error message says what to do. The most common cases:
 
 ### Options
 
-**Configure** lets you choose the entrance station used to carry the output
-session (the first camera station by default).
+**Configure** lets you choose:
+
+- the entrance station used for the output buttons and the camera (the first
+  camera station by default);
+- the camera image refresh interval (30 seconds by default, 10 to 3600).
+
+Changes apply immediately, without restarting Home Assistant.
 
 ### Pairing again
 
@@ -138,7 +166,8 @@ name to delete.
 
 - **Doorbell detection is experimental.** Ring events may be missed or
   delayed; please report whether they work with your installation.
-- The camera, call answering and output status are not available yet.
+- Call answering, two-way audio and output status are not available yet.
+- The camera has no audio, and the live view is MJPEG only.
 - The output buttons briefly open a monitoring session on an entrance station;
   the station may show it on its screen.
 - Unregistering the terminal when the integration is removed may not remove

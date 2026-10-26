@@ -107,15 +107,16 @@
   "options": {
     "step": {
       "init": {
-        "title": "Monitor outputs",
-        "description": "The two output buttons go through a short monitoring session carried by an entrance station. If it is busy, the other stations are tried.",
+        "title": "Options",
+        "description": "The output buttons and the camera use a short monitoring session carried by an entrance station. If it is busy, the other stations are tried.",
         "data": {
-          "station": "Preferred entrance station"
+          "station": "Preferred entrance station",
+          "image_refresh_interval": "Camera image refresh interval"
+        },
+        "data_description": {
+          "image_refresh_interval": "Minimum time between two camera images (10 to 3600 seconds). The image is only refreshed while it is displayed, and each refresh opens a monitoring session on the entrance station."
         }
       }
-    },
-    "abort": {
-      "no_stations": "No entrance station with a camera is known yet. Reload the integration while the cloud is reachable."
     }
   },
   "selector": {
@@ -164,6 +165,11 @@
           }
         }
       }
+    },
+    "camera": {
+      "camera": {
+        "name": "Camera"
+      }
     }
   },
   "exceptions": {
@@ -202,6 +208,12 @@
     },
     "auth_refused": {
       "message": "The Aiphone service no longer accepts this terminal (it may have been deleted from the monitor). Pair the monitor again."
+    }
+  },
+  "issues": {
+    "video_unavailable": {
+      "title": "Aiphone JO camera unavailable",
+      "description": "The camera cannot show images: {reason}.\n\nThe rest of the integration keeps working. Update the integration, then restart Home Assistant; if the problem persists, open an issue with this message."
     }
   }
 }
