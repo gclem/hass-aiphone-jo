@@ -15,7 +15,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
+
+if TYPE_CHECKING:
+    from .models import CallEndReason
 
 
 class PairingStage(StrEnum):
@@ -309,6 +312,18 @@ class StationBusyError(CommandRejectedError):
 
 class SessionError(AiphoneJoError):
     """Monitoring or call session missing, closed or already open."""
+
+
+class CallEndedError(SessionError):
+    """The call ended while it was being answered; ``reason`` tells why."""
+
+    def __init__(self, message: str, reason: CallEndReason | None = None) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+class CallAnsweredElsewhereError(CallEndedError):
+    """Another phone answered the call first."""
 
 
 class MediaError(AiphoneJoError):

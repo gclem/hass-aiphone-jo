@@ -9,8 +9,9 @@ Behaviour:
 * the station closes monitoring by itself ~60 s after monitor_req (23003): the
   client answers ``LEAVE_USER_REQ`` + ``DISCNCT_REP`` (24003, RSLT 200),
   otherwise the next monitor_req gets 486;
-* ring tracking (23001 on the monitor-wide topic, 23004 cancel, 23003 end) and
-  call answering (24001/24002/23008) are **experimental**.
+* ring tracking (23001 on the monitor-wide topic, 23004 cancel, 23003 end,
+  answers from other phones) and call answering (30011/30012, 24001, 30021,
+  24002 -> 25001, 23008) are **experimental**.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ import importlib
 import logging
 import warnings
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Generator
 from dataclasses import dataclass
 from datetime import datetime
 from types import TracebackType
@@ -42,6 +43,8 @@ from .const import (
 from .credentials import CloudCredentials
 from .exceptions import (
     AiphoneJoError,
+    CallAnsweredElsewhereError,
+    CallEndedError,
     CloudAuthError,
     CloudConnectionError,
     CommandRejectedError,
@@ -72,6 +75,7 @@ from .messages.relay import MAX_SDP_LENGTH, RelayCommand
 from .models import (
     ACTIVE_CALL_STATUSES,
     AiphoneEvent,
+    CallEndReason,
     CallSignalRecord,
     CallStatus,
     CallUpdatedEvent,
@@ -299,11 +303,22 @@ class CallSession(RelaySession):
     :meth:`send_answer` (station video), :meth:`ready` (24001),
     :meth:`add_send_audio` (30021, our microphone), :meth:`reply` (24002),
     then :meth:`start` (23008 RSLT 200) to pick up, or :meth:`reject`.
+    :meth:`AiphoneJoClient.answer_call` runs the whole sequence.
+
+    ``first_answer`` is ``True`` when the station confirmed (25001) that this
+    client answered first, ``False`` when another phone did.
     """
 
     def __init__(self, client: AiphoneJoClient, call: IncomingCall) -> None:
         super().__init__(client, call.cid, call.station_client_id)
         self.call = call
+        self.first_answer: bool | None = None
+        self._replied = False
+
+    def _require_active(self) -> None:
+        if not self.active and not self.call.active:
+            raise _call_ended_error(self.call)
+        super()._require_active()
 
     async def _signal(self, signal: CallSignal) -> Message | None:
         self._require_active()
@@ -330,8 +345,28 @@ class CallSession(RelaySession):
         return answer if isinstance(answer, str) and len(answer) <= MAX_SDP_LENGTH else ""
 
     async def reply(self) -> Message | None:
-        """``REPLY`` (24002, RSLT 200) -> ``REP_RCV_NFY`` (25001)."""
-        return await self._signal(CallSignal.REPLY)
+        """``REPLY`` (24002, RSLT 200) -> ``REP_RCV_NFY`` (25001).
+
+        The 25001 names the first client that answered (``PCLIID``): when it
+        is another phone, the call ends with
+        :attr:`CallEndReason.ANSWERED_ELSEWHERE` and the relay is left.
+        """
+        self._require_active()
+        self._replied = True
+        reply = await self._signal(CallSignal.REPLY)
+        if reply is not None:
+            first = header(reply).get("PCLIID")
+            if isinstance(first, str) and first:
+                self.first_answer = first == self._client.credentials.client_id
+        return reply
+
+    async def _send_talk_offer(self, sdp: str) -> str:
+        answer = await self.add_send_audio(sdp)
+        if not answer:
+            raise CommandRejectedError(
+                "ADD_SND_USER reply without SDP.", mid=Mid.ADD_SND_USER_REP, rslt=None
+            )
+        return answer
 
     async def start(self) -> bool:
         """``CALL_STA_REQ`` (23008, RSLT 200) -> 24008: pick up. Returns ``True`` if accepted."""
@@ -344,8 +379,31 @@ class CallSession(RelaySession):
     async def close(self) -> dict[str, Any]:
         """Hang up: ``LEAVE_USER_REQ`` then ``DISCNCT_REQ`` (REASON 16)."""
         steps = await super().close()
-        self._client._end_call(self.call, CallStatus.ENDED)
+        self._client._end_call(self.call, CallStatus.ENDED, CallEndReason.ENDED_BY_CLIENT)
         return steps
+
+    async def _withdraw(self) -> None:
+        """Leave the relay (30031) without ending the call for the other phones."""
+        if self.active:
+            self._client._detach_session(self, SessionEndedBy.CLIENT)
+            leave = build_relay_request(
+                RelayCommand.LEAVE_USER,
+                self._client.credentials,
+                cid=self.cid,
+                cor_cli_id=self.cor_cli_id,
+            )
+            try:
+                await self._client.request(leave, cid=self.cid, timeout=END_SESSION_STEP_TIMEOUT)
+            except AiphoneJoError as err:
+                _LOGGER.warning("Incomplete withdrawal from the call: %s", err)
+        self._release()
+
+    async def _abort(self) -> None:
+        """Tear down after a failed answer: hang up if the call is ours, else withdraw."""
+        if self.active and (self.call.status is CallStatus.TALKING or self.first_answer):
+            await self.close()
+        else:
+            await self._withdraw()
 
     async def reject(self) -> None:
         """Decline: ``CALL_STA_REQ`` (23008, RSLT 603) then ``LEAVE_USER_REQ``."""
@@ -362,8 +420,86 @@ class CallSession(RelaySession):
             )
         finally:
             self._client._detach_session(self, SessionEndedBy.CLIENT)
-            self._client._end_call(self.call, CallStatus.REJECTED)
+            self._client._end_call(self.call, CallStatus.REJECTED, CallEndReason.REJECTED)
             self._release()
+
+
+def _call_ended_error(call: IncomingCall) -> CallEndedError:
+    reason = call.end_reason
+    if reason is CallEndReason.ANSWERED_ELSEWHERE:
+        return CallAnsweredElsewhereError("Another phone answered the call.", reason)
+    label = reason.value if reason is not None else call.status.value
+    return CallEndedError(f"The call ended ({label}).", reason)
+
+
+SendOffer = Callable[[str], Awaitable[str]]
+"""Sends our SDP offer for the talk path (30021) and returns the relay's answer (31021)."""
+
+Talk = Callable[[SendOffer], Awaitable[None]]
+"""Optional talk-path negotiation of :meth:`AiphoneJoClient.answer_call`."""
+
+
+class AnswerCall:
+    """Returned by :meth:`AiphoneJoClient.answer_call`.
+
+    ``await`` it to get the :class:`CallSession` (close it yourself), or use it
+    as ``async with ... as session:`` to have the call hung up (30031 then
+    23003) when the block exits.
+    """
+
+    def __init__(
+        self,
+        client: AiphoneJoClient,
+        call: IncomingCall | None,
+        negotiate: Negotiator | None,
+        talk: Talk | None,
+    ) -> None:
+        self._client = client
+        self._call = call
+        self._negotiate = negotiate
+        self._talk = talk
+        self._session: CallSession | None = None
+
+    def __await__(self) -> Generator[Any, None, CallSession]:
+        return self._start().__await__()
+
+    async def __aenter__(self) -> CallSession:
+        self._session = await self._start()
+        return self._session
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        session, self._session = self._session, None
+        if session is not None:
+            await session.close()
+
+    async def _start(self) -> CallSession:
+        if self._talk is not None and self._negotiate is None:
+            raise InvalidInputError("talk requires negotiate.")
+        session = await self._client._engage_call(self._call)
+        if self._negotiate is None:
+            return session
+        try:
+            offer = await session.request_offer()
+            answer = await self._negotiate(offer)
+            await session.send_answer(answer)
+            await session.ready()
+            if self._talk is not None:
+                await self._talk(session._send_talk_offer)
+            await session.reply()
+            if not await session.start():
+                session._require_active()
+                raise CommandRejectedError(
+                    "CALL_STA_REQ was not accepted.", mid=Mid.CALL_STA_REP, rslt=None
+                )
+        except BaseException:
+            await session._abort()
+            raise
+        return session
 
 
 class AiphoneJoClient:
@@ -835,12 +971,45 @@ class AiphoneJoClient:
         async with self.monitor(terminal, term_kind) as session:
             await session.open(selected)
 
-    async def answer_call(self, call: IncomingCall | None = None) -> CallSession:
-        """**Experimental**: take over the ringing call (reuses the ring ``CID``).
+    def answer_call(
+        self,
+        call: IncomingCall | None = None,
+        negotiate: Negotiator | None = None,
+        *,
+        talk: Talk | None = None,
+    ) -> AnswerCall:
+        """**Experimental**: answer the ringing call (reuses the ring ``CID``).
 
         No STA_RELAY_REQ nor monitor_req: the station already opened the
-        session.
+        session. Without ``negotiate``, returns the :class:`CallSession` as
+        is, for a manual sequence. With ``negotiate`` (same contract as in
+        :meth:`live_monitor`), runs the whole pick-up::
+
+            async with client.answer_call(call, negotiate, talk=talk) as session:
+                ...  # talking; leaving the block hangs up
+
+        1. ``ADD_RCV_USER_REQ`` (30011): the relay's offer goes to
+           ``negotiate``, whose answer is sent with ``UPDATE_RCV_USER_REQ``
+           (30012); then ``READY_NFY`` (24001).
+        2. If ``talk`` is given, it is awaited as ``talk(send_offer)``:
+           ``send_offer(offer_sdp)`` sends our offer for the talk path
+           (``ADD_SND_USER_REQ`` 30021) and returns the relay's answer (31021).
+           Without ``talk`` this step is skipped and the station only sends
+           media.
+        3. ``REPLY`` (24002) -> 25001: raises
+           :class:`CallAnsweredElsewhereError` if another phone was first.
+        4. ``CALL_STA_REQ`` (23008, RSLT 200) -> 24008: the call is
+           :attr:`CallStatus.TALKING`.
+
+        On failure the session is torn down: hung up (30031 then 23003) once
+        the call is ours, otherwise only the relay is left (30031) so the
+        other phones keep ringing. Raises :class:`CallEndedError` if the call
+        ends meanwhile, :class:`SessionError` if no call rings or a session is
+        already open.
         """
+        return AnswerCall(self, call, negotiate, talk)
+
+    async def _engage_call(self, call: IncomingCall | None) -> CallSession:
         target = call or self._call
         if target is None or target.status is not CallStatus.RINGING:
             raise SessionError("No ringing call.")
@@ -880,7 +1049,7 @@ class AiphoneJoClient:
         cor_cli_id = session.cor_cli_id
         self._detach_session(session, SessionEndedBy.STATION)
         if isinstance(session, CallSession):
-            self._end_call(session.call, CallStatus.ENDED)
+            self._end_call(session.call, CallStatus.ENDED, CallEndReason.ENDED_BY_STATION)
         self._spawn(self._answer_station_disconnect(session.cid, cor_cli_id))
 
     async def _answer_station_disconnect(self, cid: str, cor_cli_id: str) -> None:
@@ -936,16 +1105,54 @@ class AiphoneJoClient:
             )
         )
         del call.signals[:-_MAX_CALL_SIGNALS]
-        if mid in (Mid.CALL_CANCEL_REQ, Mid.DISCONNECT_REQ) and call.status in ACTIVE_CALL_STATUSES:
-            session = self._session
-            engaged = isinstance(session, CallSession) and session.active and session.cid == cid
-            if mid == Mid.CALL_CANCEL_REQ and engaged and session is not None:
-                cor_cli_id = session.cor_cli_id
-                self._detach_session(session, SessionEndedBy.STATION)
-                self._spawn(self._answer_engaged_cancel(call, cor_cli_id))
-            self._end_call(
-                call, CallStatus.CANCELLED if mid == Mid.CALL_CANCEL_REQ else CallStatus.ENDED
+        if call.status not in ACTIVE_CALL_STATUSES:
+            return
+        session = self._session
+        engaged = (
+            session
+            if isinstance(session, CallSession) and session.active and session.cid == cid
+            else None
+        )
+        if mid == Mid.CALL_CANCEL_REQ:
+            if engaged is not None:
+                self._detach_session(engaged, SessionEndedBy.STATION)
+                self._spawn(self._answer_engaged_cancel(call, engaged.cor_cli_id))
+            self._end_call(call, CallStatus.CANCELLED, CallEndReason.CANCELLED_BY_STATION)
+        elif mid == Mid.DISCONNECT_REQ:
+            self._end_call(call, CallStatus.ENDED, CallEndReason.ENDED_BY_STATION)
+        elif call.status is CallStatus.RINGING and self._answered_elsewhere(call, head, engaged):
+            if engaged is not None:
+                self._detach_session(engaged, SessionEndedBy.STATION)
+                self._spawn(self._leave_relay(call.cid, engaged.cor_cli_id))
+            _LOGGER.info("The call was answered on another phone")
+            self._end_call(call, CallStatus.ANSWERED_ELSEWHERE, CallEndReason.ANSWERED_ELSEWHERE)
+
+    def _answered_elsewhere(
+        self, call: IncomingCall, head: dict[str, Any], engaged: CallSession | None
+    ) -> bool:
+        own = self._credentials.client_id
+        mid = head.get("MID")
+        if mid == Mid.REP_RCV_NFY:
+            # 25001 names the first client that answered.
+            first = head.get("PCLIID")
+            return isinstance(first, str) and bool(first) and first != own
+        if mid == Mid.REPLY and head.get("RSLT") == 200:
+            # Another phone's REPLY; once ours is sent, the 25001 decides.
+            sender = head.get("CLIID")
+            if engaged is not None and engaged._replied:
+                return False
+            return isinstance(sender, str) and sender not in ("", own, call.station_client_id)
+        return False
+
+    async def _leave_relay(self, cid: str, cor_cli_id: str) -> None:
+        try:
+            await self.publish(
+                build_relay_request(
+                    RelayCommand.LEAVE_USER, self._credentials, cid=cid, cor_cli_id=cor_cli_id
+                )
             )
+        except AiphoneJoError as err:
+            _LOGGER.warning("Incomplete cleanup after an answer elsewhere: %s", err)
 
     async def _answer_engaged_cancel(self, call: IncomingCall, cor_cli_id: str) -> None:
         # 23004 while engaged: CALL_CANCEL_REP (24004 RSLT 200 REASON 16) then LEAVE_USER.
@@ -965,21 +1172,29 @@ class AiphoneJoClient:
 
     def _expire_call(self, call: IncomingCall) -> None:
         if call.status is CallStatus.RINGING and not call.engaged:
-            self._end_call(call, CallStatus.EXPIRED)
+            self._end_call(call, CallStatus.EXPIRED, CallEndReason.EXPIRED)
 
-    def _set_call_status(self, call: IncomingCall, status: CallStatus) -> None:
+    def _set_call_status(
+        self, call: IncomingCall, status: CallStatus, reason: CallEndReason | None = None
+    ) -> None:
         if call.status is not status:
             call.status = status
-            self._emit(CallUpdatedEvent(call))
+            self._emit(CallUpdatedEvent(call, reason))
 
-    def _end_call(self, call: IncomingCall, status: CallStatus) -> None:
+    def _end_call(self, call: IncomingCall, status: CallStatus, reason: CallEndReason) -> None:
         if call.status not in ACTIVE_CALL_STATUSES:
             return
         call.ended_at = datetime.now().astimezone()
+        call.end_reason = reason
         if self._call_timer is not None and self._call is call:
             self._call_timer.cancel()
             self._call_timer = None
-        self._set_call_status(call, status)
+        self._set_call_status(call, status, reason)
+        # Requests still waiting on this call's CID will never be answered.
+        error = _call_ended_error(call)
+        for waiter in self._waiters:
+            if waiter.cid == call.cid and not waiter.future.done():
+                waiter.future.set_exception(error)
 
 
 class _MonitorContext:

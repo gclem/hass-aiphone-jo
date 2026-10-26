@@ -237,7 +237,8 @@ def _describe_event(event: AiphoneEvent) -> str | None:
         call = event.call
         return f"RING from {call.display_name or 'station'} (terminal {call.term_id})"
     if isinstance(event, CallUpdatedEvent):
-        return f"call {event.call.status.value}"
+        reason = f" ({event.reason.value})" if event.reason else ""
+        return f"call {event.call.status.value}{reason}"
     if isinstance(event, SessionEndedEvent):
         return f"session ended by {event.by.value}"
     if isinstance(event, ConnectionStateEvent):

@@ -92,6 +92,24 @@ class CallStatus(StrEnum):
     ENDED = "ended"
     REJECTED = "rejected"
     EXPIRED = "expired"
+    ANSWERED_ELSEWHERE = "answered_elsewhere"
+
+
+class CallEndReason(StrEnum):
+    """Why an incoming call ended (:attr:`IncomingCall.end_reason`)."""
+
+    ANSWERED_ELSEWHERE = "answered_elsewhere"
+    """Another phone answered first (25001 naming another client, or its 24002)."""
+    ENDED_BY_STATION = "ended_by_station"
+    """The station hung up (DISCNCT_REQ 23003)."""
+    CANCELLED_BY_STATION = "cancelled_by_station"
+    """The visitor or the station abandoned the call (CALL_CANCEL_REQ 23004)."""
+    EXPIRED = "expired"
+    """Nobody answered before the ring timeout."""
+    REJECTED = "rejected"
+    """This client declined the call (23008 RSLT 603)."""
+    ENDED_BY_CLIENT = "ended_by_client"
+    """This client hung up (30031 then 23003)."""
 
 
 ACTIVE_CALL_STATUSES = frozenset({CallStatus.RINGING, CallStatus.TALKING})
@@ -128,6 +146,7 @@ class IncomingCall:
     ended_at: datetime | None = None
     engaged: bool = False
     signals: list[CallSignalRecord] = field(default_factory=list)
+    end_reason: CallEndReason | None = None
 
     @property
     def active(self) -> bool:
@@ -167,9 +186,14 @@ class RingEvent:
 
 @dataclass(frozen=True, slots=True)
 class CallUpdatedEvent:
-    """The status of the current call changed."""
+    """The status of the current call changed.
+
+    ``reason`` is set when the call ends (same value as
+    :attr:`IncomingCall.end_reason`).
+    """
 
     call: IncomingCall
+    reason: CallEndReason | None = None
 
 
 @dataclass(frozen=True, slots=True)

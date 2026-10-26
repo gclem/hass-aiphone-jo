@@ -2,7 +2,7 @@
 
 All notable changes to this integration.
 
-## Unreleased
+## 0.4.0
 
 - Entrance stations that keep their factory default Japanese name (such as
   `玄関1`) are shown translated, for example **Entrance 1** in English or
@@ -18,6 +18,7 @@ All notable changes to this integration.
   stop a few seconds after the last viewer leaves. This relies on go2rtc's
   RTSP server and ffmpeg (see the README for an external go2rtc server);
   without the RTSP server, the live view stops with each session as before.
+- Update the aiphone-jo library to 0.4.0.
 
 ## 0.3.0
 
