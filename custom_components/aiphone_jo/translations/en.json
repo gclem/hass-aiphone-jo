@@ -1,0 +1,207 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Pair with the Aiphone JO-1MDW",
+        "description": "Home Assistant pairs with the monitor like a smartphone.\n\n1. Home Assistant and the monitor must be on the same local network.\n2. On the monitor, open the smartphone settings and start **adding a smartphone**. Keep the monitor in that mode during the next steps.\n3. Pairing uses **one smartphone slot** on the monitor.\n\nThen choose how to find the monitor.",
+        "data": {
+          "method": "How to find the monitor"
+        }
+      },
+      "manual": {
+        "title": "Monitor address",
+        "description": "Enter the monitor's IP address on your local network (shown in your router's device list). The monitor must still be in \"add smartphone\" mode.",
+        "data": {
+          "host": "IP address",
+          "port": "Pairing port (optional)"
+        },
+        "data_description": {
+          "port": "Leave empty: the monitor reports it during discovery. Only needed if discovery replies are blocked."
+        }
+      },
+      "pick_monitor": {
+        "title": "Several monitors found",
+        "description": "Several monitors are in \"add smartphone\" mode. Choose the one to pair.",
+        "data": {
+          "monitor": "Monitor"
+        }
+      },
+      "confirm_fingerprint": {
+        "title": "Check the monitor certificate",
+        "description": "The monitor at {address} presents this certificate fingerprint (SHA-256):\n\n`{fingerprint}`\n\nValid until: {valid_until}\n\nNothing has been sent to the monitor yet. Home Assistant will only accept this exact certificate from now on. Confirm only if you are pairing your own monitor on your own network.",
+        "data": {
+          "trust": "I trust this certificate"
+        }
+      },
+      "fingerprint_changed": {
+        "title": "The monitor certificate changed",
+        "description": "The monitor presents a different certificate than the one approved during the previous pairing.\n\nPrevious: `{previous}`\nNow: `{fingerprint}`\n\nThis is expected after a factory reset or a replacement of the monitor. Otherwise another device may be answering on your network: do not continue.",
+        "data": {
+          "trust": "I trust the new certificate"
+        }
+      },
+      "code": {
+        "title": "Enter the code shown on the monitor",
+        "description": "The monitor now displays a code. Enter it below without waiting: it expires after a short time.",
+        "data": {
+          "code": "Code"
+        }
+      },
+      "terminal_name": {
+        "title": "Name this terminal",
+        "description": "This name appears in the monitor's smartphone list (12 characters maximum). It must not be used by another smartphone.",
+        "data": {
+          "terminal_name": "Terminal name"
+        }
+      },
+      "pairing_window_closed": {
+        "title": "Pairing interrupted",
+        "description": "The monitor closed the pairing connection: the \"add smartphone\" mode ended or timed out, or the monitor refused the last request (see the message below).\n\nFix the cause if needed, start **adding a smartphone** again on the monitor, then select **Submit** right away. Home Assistant reconnects with the certificate you already approved and resumes at the code step."
+      },
+      "reauth_confirm": {
+        "title": "Pair the monitor again",
+        "description": "The monitor no longer accepts Home Assistant's identity (the terminal may have been deleted from the monitor). Pair again: put the monitor in \"add smartphone\" mode, then select **Submit**."
+      },
+      "reconfigure": {
+        "title": "Pair again",
+        "description": "Home Assistant will pair again with the same monitor, with the name below, then remove the previous terminal. Put the monitor in \"add smartphone\" mode before continuing.",
+        "data": {
+          "terminal_name": "Terminal name"
+        }
+      }
+    },
+    "error": {
+      "no_monitor_found": "No monitor answered. Check that the monitor is in \"add smartphone\" mode, that Home Assistant is on the same network (same subnet or VLAN), and that UDP ports 51711 and 51712 are not blocked by a firewall. You can also enter the monitor address.",
+      "no_monitor_at_address": "The monitor did not answer at this address. Check the address and that the monitor is still in \"add smartphone\" mode, then try again.",
+      "discovery_failed": "The network search could not run ({code}). Another application may be using UDP port 51712, or Home Assistant lacks network access. Enter the monitor address instead.",
+      "registration_in_progress": "Another smartphone is being added on the monitor. Finish or cancel it on the monitor, then try again.",
+      "smartphone_limit": "The monitor has reached its smartphone limit. Delete a smartphone in the monitor's smartphone settings, then try again.",
+      "cannot_connect": "Could not open a secure connection to the monitor ({code}). Check that the monitor is still in \"add smartphone\" mode and reachable, then try again.",
+      "fingerprint_mismatch": "The monitor presented a certificate that does not match the approved one. Nothing was sent. Start again from the beginning.",
+      "timeout": "The monitor did not answer in time. Put it in \"add smartphone\" mode again and retry immediately.",
+      "invalid_code": "Wrong code. Enter exactly the code shown on the monitor.",
+      "code_expired": "The code expired. A new code is now shown on the monitor: enter it quickly.",
+      "name_too_long": "Enter a name of 1 to 12 characters.",
+      "name_taken": "This name is already used by another smartphone on the monitor. Choose another name.",
+      "eula_not_accepted": "The licence agreement has not been accepted on the monitor. Accept it in the monitor's smartphone settings, then submit again.",
+      "incompatible_version": "The monitor's software version is not compatible. Update the monitor, then try again.",
+      "monitor_rejected": "The monitor refused the request ({code}). Put it in \"add smartphone\" mode again and retry; if it persists, report the code.",
+      "cloud_unreachable": "Could not reach the Aiphone service. Check Home Assistant's internet connection, then submit again.",
+      "cloud_error": "The Aiphone service returned an error ({code}). Wait a moment, then submit again.",
+      "cloud_timeout": "The Aiphone service did not answer in time. Submit again.",
+      "unknown": "Unexpected error ({code}). Try again; if it persists, report this code.",
+      "retry": "The monitor asked to try again. Wait a few seconds, put it in \"add smartphone\" mode again if needed, then submit.",
+      "check_network": "The monitor reports a network problem. Check the monitor's internet connection, then try again.",
+      "link_closed": "The monitor closed the pairing connection.",
+      "invalid_code_new_code": "Wrong code. The monitor now shows a new code: enter it exactly as displayed.",
+      "cloud_invalid_response": "The Aiphone service returned an unexpected reply. Try again; if it persists, start the pairing again."
+    },
+    "abort": {
+      "already_configured": "This monitor is already paired with Home Assistant.",
+      "fingerprint_rejected": "Pairing cancelled: the certificate was not approved. Nothing was sent to the monitor.",
+      "reauth_successful": "The monitor is paired again.",
+      "reconfigure_successful": "The monitor is paired again.",
+      "wrong_monitor": "This is not the monitor that was paired with this entry. Pair the original monitor, or add the new one as a new integration."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Door opening",
+        "description": "Openings go through a short monitoring session carried by an entrance station. If it is busy, the other stations are tried.",
+        "data": {
+          "station": "Preferred entrance station"
+        }
+      }
+    },
+    "abort": {
+      "no_stations": "No entrance station with a camera is known yet. Reload the integration while the cloud is reachable."
+    }
+  },
+  "selector": {
+    "method": {
+      "options": {
+        "discover": "Search the local network",
+        "manual": "Enter the monitor address"
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "ringing": {
+        "name": "Ringing"
+      }
+    },
+    "button": {
+      "large_opening": {
+        "name": "Large opening"
+      },
+      "small_opening": {
+        "name": "Small opening"
+      }
+    },
+    "event": {
+      "ring": {
+        "name": "Ring",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "ring": "Ring"
+            }
+          },
+          "station": {
+            "name": "Entrance station"
+          }
+        }
+      }
+    },
+    "sensor": {
+      "last_station": {
+        "name": "Last ringing station",
+        "state_attributes": {
+          "rang_at": {
+            "name": "Rang at"
+          }
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "invalid_credentials": {
+      "message": "The stored identity is invalid or expired. Pair the monitor again."
+    },
+    "cloud_unavailable": {
+      "message": "The Aiphone service is unreachable. Home Assistant will retry automatically."
+    },
+    "no_station": {
+      "message": "No entrance station with a camera is known: openings need one. Reload the integration while the cloud is reachable."
+    },
+    "not_connected": {
+      "message": "Not connected to the monitor. Home Assistant reconnects automatically; try again shortly."
+    },
+    "command_timeout": {
+      "message": "The monitor did not answer in time. Try again."
+    },
+    "command_rejected": {
+      "message": "The monitor refused the opening ({code}). Try again in a few seconds."
+    },
+    "command_failed": {
+      "message": "The opening failed ({code}). Try again."
+    },
+    "station_busy": {
+      "message": "Every entrance station is busy (call or monitoring in progress). Try again in a few seconds."
+    },
+    "manual_removal_title": {
+      "message": "Aiphone JO: remove the terminal from the monitor"
+    },
+    "manual_removal": {
+      "message": "Home Assistant could not unregister the terminal **{name}** from the monitor. It still uses a smartphone slot: on the monitor, open the smartphone settings and delete **{name}**."
+    },
+    "credentials_expired": {
+      "message": "The monitor identity has expired. Pair the monitor again."
+    },
+    "auth_refused": {
+      "message": "The Aiphone service no longer accepts this terminal (it may have been deleted from the monitor). Pair the monitor again."
+    }
+  }
+}

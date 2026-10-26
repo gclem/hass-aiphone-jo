@@ -1,0 +1,140 @@
+name: Sync library
+
+on:
+  repository_dispatch:
+    types: [aiphone-jo-released]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Library tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-lib
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Vendor library and merge
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
+      checks: read
+      statuses: read
+      pull-requests: read
+    env:
+      TAG: ${{ github.event.client_payload.tag || inputs.tag }}
+      EXPECTED_SHA: ${{ github.event.client_payload.sha }}
+      HAS_TOKEN: ${{ secrets.HASS_SYNC_TOKEN != '' }}
+      BOT_NAME: github-actions[bot]
+      BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+    steps:
+      - name: Validate inputs
+        run: |
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "::error::The HASS_SYNC_TOKEN secret is not configured."
+            exit 1
+          fi
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?$ ]]; then
+            echo "::error::Invalid library tag '$TAG', expected vX.Y.Z[aN|bN|rcN]."
+            exit 1
+          fi
+          if [ -n "$EXPECTED_SHA" ] && ! [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Invalid library SHA '$EXPECTED_SHA'."
+            exit 1
+          fi
+
+      - name: Check out the integration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.HASS_SYNC_TOKEN }}
+
+      - name: Download and verify the library release
+        id: lib
+        env:
+          GH_TOKEN: ${{ secrets.HASS_SYNC_TOKEN }}
+          LIB_DIST: ${{ runner.temp }}/lib-dist
+        run: |
+          gh release download "$TAG" -R gclem/aiphone-jo-lib -D "$LIB_DIST"
+          (cd "$LIB_DIST" && sha256sum --check --strict SHA256SUMS)
+          sha="$(gh api "repos/gclem/aiphone-jo-lib/commits/$TAG" --jq .sha)"
+          if [ -n "$EXPECTED_SHA" ] && [ "$sha" != "$EXPECTED_SHA" ]; then
+            echo "::error::$TAG points to $sha, dispatch announced $EXPECTED_SHA."
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "sdist=$LIB_DIST/aiphone_jo-${TAG#v}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Vendor library and bump version
+        id: sync
+        env:
+          SHA: ${{ steps.lib.outputs.sha }}
+          SDIST: ${{ steps.lib.outputs.sdist }}
+          MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          args=(--sdist "$SDIST" --tag "$TAG" --sha "$SHA")
+          if [ "$MANUAL" = "true" ]; then args+=(--allow-prerelease); fi
+          python scripts/release_tools.py sync-lib "${args[@]}"
+
+      - name: Open pull request
+        id: pr
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.HASS_SYNC_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.sync.outputs.version }}
+          LIB_VERSION: ${{ steps.sync.outputs.lib_version }}
+        run: |
+          branch="sync/aiphone-jo-$TAG"
+          git config user.name "$BOT_NAME"
+          git config user.email "$BOT_EMAIL"
+          git switch -c "$branch"
+          git add -A
+          git commit -q -m "Update aiphone-jo to $LIB_VERSION"
+          git push --force origin "$branch"
+          body="Update aiphone-jo to $LIB_VERSION; integration version $VERSION."
+          if ! gh pr view "$branch" --json state --jq .state 2>/dev/null | grep -qx OPEN; then
+            gh pr create --base main --head "$branch" \
+              --title "Update aiphone-jo to $LIB_VERSION" --body "$body"
+          fi
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for CI
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ steps.pr.outputs.branch }}
+        run: |
+          for _ in $(seq 1 30); do
+            count="$(gh pr checks "$BRANCH" --json name --jq length 2>/dev/null || true)"
+            [ "${count:-0}" -gt 0 ] && break
+            sleep 10
+          done
+          sleep 30
+          gh pr checks "$BRANCH" --watch --fail-fast --interval 20
+
+      - name: Merge into main
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          BRANCH: ${{ steps.pr.outputs.branch }}
+        run: |
+          git fetch -q origin main
+          if [ "$(git rev-parse origin/main)" != "$(git rev-parse HEAD~1)" ]; then
+            echo "::error::main moved; merge the pull request manually."
+            exit 1
+          fi
+          git push origin "HEAD:main"
+          git push origin --delete "$BRANCH"

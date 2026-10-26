@@ -1,0 +1,25 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "ringing": {
+        "default": "mdi:bell-outline",
+        "state": {
+          "on": "mdi:bell-ring"
+        }
+      }
+    },
+    "button": {
+      "large_opening": {
+        "default": "mdi:gate-open"
+      },
+      "small_opening": {
+        "default": "mdi:door-open"
+      }
+    },
+    "sensor": {
+      "last_station": {
+        "default": "mdi:doorbell-video"
+      }
+    }
+  }
+}

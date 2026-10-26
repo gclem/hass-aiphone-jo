@@ -1,0 +1,22 @@
+# Development tooling configuration (the integration is not a package).
+
+[tool.ruff]
+target-version = "py313"
+extend-exclude = ["custom_components/aiphone_jo/vendor/aiphone_jo"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "ASYNC", "RUF"]
+
+[tool.mypy]
+python_version = "3.13"
+exclude = ["^custom_components/aiphone_jo/vendor/aiphone_jo/"]
+
+[[tool.mypy.overrides]]
+module = ["custom_components.aiphone_jo.vendor.aiphone_jo.*"]
+follow_imports = "skip"
+ignore_errors = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

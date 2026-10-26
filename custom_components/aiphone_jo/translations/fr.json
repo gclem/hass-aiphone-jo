@@ -1,0 +1,207 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Appairer l'Aiphone JO-1MDW",
+        "description": "Home Assistant s'appaire au moniteur comme un smartphone.\n\n1. Home Assistant et le moniteur doivent être sur le même réseau local.\n2. Sur le moniteur, ouvrez les réglages smartphone et lancez **l'ajout d'un smartphone**. Laissez le moniteur dans ce mode pendant les étapes suivantes.\n3. L'appairage occupe **une place de smartphone** sur le moniteur.\n\nChoisissez ensuite comment trouver le moniteur.",
+        "data": {
+          "method": "Comment trouver le moniteur"
+        }
+      },
+      "manual": {
+        "title": "Adresse du moniteur",
+        "description": "Saisissez l'adresse IP du moniteur sur votre réseau local (visible dans la liste des appareils de votre box). Le moniteur doit toujours être en mode « ajout de smartphone ».",
+        "data": {
+          "host": "Adresse IP",
+          "port": "Port d'appairage (facultatif)"
+        },
+        "data_description": {
+          "port": "Laissez vide : le moniteur l'indique lors de la recherche. Utile seulement si ses réponses sont bloquées."
+        }
+      },
+      "pick_monitor": {
+        "title": "Plusieurs moniteurs trouvés",
+        "description": "Plusieurs moniteurs sont en mode « ajout de smartphone ». Choisissez celui à appairer.",
+        "data": {
+          "monitor": "Moniteur"
+        }
+      },
+      "confirm_fingerprint": {
+        "title": "Vérifier le certificat du moniteur",
+        "description": "Le moniteur à l'adresse {address} présente cette empreinte de certificat (SHA-256) :\n\n`{fingerprint}`\n\nValable jusqu'au : {valid_until}\n\nRien n'a encore été envoyé au moniteur. Home Assistant n'acceptera plus que ce certificat précis. Ne confirmez que si vous appairez votre propre moniteur, sur votre propre réseau.",
+        "data": {
+          "trust": "Je fais confiance à ce certificat"
+        }
+      },
+      "fingerprint_changed": {
+        "title": "Le certificat du moniteur a changé",
+        "description": "Le moniteur présente un certificat différent de celui approuvé lors du précédent appairage.\n\nAvant : `{previous}`\nMaintenant : `{fingerprint}`\n\nC'est normal après une réinitialisation ou un remplacement du moniteur. Sinon, un autre appareil répond peut-être sur votre réseau : n'allez pas plus loin.",
+        "data": {
+          "trust": "Je fais confiance au nouveau certificat"
+        }
+      },
+      "code": {
+        "title": "Saisissez le code affiché sur le moniteur",
+        "description": "Le moniteur affiche maintenant un code. Saisissez-le sans attendre : il expire rapidement.",
+        "data": {
+          "code": "Code"
+        }
+      },
+      "terminal_name": {
+        "title": "Nommer ce terminal",
+        "description": "Ce nom apparaît dans la liste des smartphones du moniteur (12 caractères maximum). Il ne doit pas être utilisé par un autre smartphone.",
+        "data": {
+          "terminal_name": "Nom du terminal"
+        }
+      },
+      "pairing_window_closed": {
+        "title": "Appairage interrompu",
+        "description": "Le moniteur a fermé la connexion d'appairage : le mode « ajout de smartphone » s'est terminé ou a expiré, ou le moniteur a refusé la dernière demande (voir le message ci-dessous).\n\nCorrigez la cause si besoin, relancez **l'ajout d'un smartphone** sur le moniteur, puis sélectionnez **Valider** immédiatement. Home Assistant se reconnecte avec le certificat déjà approuvé et reprend à l'étape du code."
+      },
+      "reauth_confirm": {
+        "title": "Appairer à nouveau le moniteur",
+        "description": "Le moniteur n'accepte plus l'identité de Home Assistant (le terminal a peut-être été supprimé du moniteur). Appairez à nouveau : passez le moniteur en mode « ajout de smartphone », puis sélectionnez **Valider**."
+      },
+      "reconfigure": {
+        "title": "Appairer à nouveau",
+        "description": "Home Assistant va s'appairer à nouveau avec le même moniteur, sous le nom ci-dessous, puis retirer l'ancien terminal. Passez le moniteur en mode « ajout de smartphone » avant de continuer.",
+        "data": {
+          "terminal_name": "Nom du terminal"
+        }
+      }
+    },
+    "error": {
+      "no_monitor_found": "Aucun moniteur n'a répondu. Vérifiez que le moniteur est en mode « ajout de smartphone », que Home Assistant est sur le même réseau (même sous-réseau ou VLAN) et qu'aucun pare-feu ne bloque les ports UDP 51711 et 51712. Vous pouvez aussi saisir l'adresse du moniteur.",
+      "no_monitor_at_address": "Le moniteur n'a pas répondu à cette adresse. Vérifiez l'adresse et que le moniteur est toujours en mode « ajout de smartphone », puis réessayez.",
+      "discovery_failed": "La recherche sur le réseau n'a pas pu se lancer ({code}). Une autre application utilise peut-être le port UDP 51712, ou Home Assistant n'a pas accès au réseau. Saisissez plutôt l'adresse du moniteur.",
+      "registration_in_progress": "Un autre smartphone est en cours d'ajout sur le moniteur. Terminez-le ou annulez-le sur le moniteur, puis réessayez.",
+      "smartphone_limit": "Le moniteur a atteint sa limite de smartphones. Supprimez un smartphone dans les réglages smartphone du moniteur, puis réessayez.",
+      "cannot_connect": "Impossible d'ouvrir une connexion sécurisée avec le moniteur ({code}). Vérifiez que le moniteur est toujours en mode « ajout de smartphone » et joignable, puis réessayez.",
+      "fingerprint_mismatch": "Le moniteur a présenté un certificat différent de celui approuvé. Rien n'a été envoyé. Recommencez depuis le début.",
+      "timeout": "Le moniteur n'a pas répondu à temps. Relancez le mode « ajout de smartphone » et réessayez immédiatement.",
+      "invalid_code": "Code erroné. Saisissez exactement le code affiché sur le moniteur.",
+      "code_expired": "Le code a expiré. Un nouveau code est affiché sur le moniteur : saisissez-le rapidement.",
+      "name_too_long": "Saisissez un nom de 1 à 12 caractères.",
+      "name_taken": "Ce nom est déjà utilisé par un autre smartphone du moniteur. Choisissez un autre nom.",
+      "eula_not_accepted": "Le contrat d'utilisation n'a pas été accepté sur le moniteur. Acceptez-le dans les réglages smartphone du moniteur, puis validez à nouveau.",
+      "incompatible_version": "La version logicielle du moniteur n'est pas compatible. Mettez le moniteur à jour, puis réessayez.",
+      "monitor_rejected": "Le moniteur a refusé la demande ({code}). Relancez le mode « ajout de smartphone » et réessayez ; si le problème persiste, signalez ce code.",
+      "cloud_unreachable": "Impossible de joindre le service Aiphone. Vérifiez la connexion internet de Home Assistant, puis validez à nouveau.",
+      "cloud_error": "Le service Aiphone a renvoyé une erreur ({code}). Patientez un instant, puis validez à nouveau.",
+      "cloud_timeout": "Le service Aiphone n'a pas répondu à temps. Validez à nouveau.",
+      "unknown": "Erreur inattendue ({code}). Réessayez ; si le problème persiste, signalez ce code.",
+      "retry": "Le moniteur demande de réessayer. Patientez quelques secondes, relancez si besoin le mode « ajout de smartphone », puis validez.",
+      "check_network": "Le moniteur signale un problème de réseau. Vérifiez la connexion internet du moniteur, puis réessayez.",
+      "link_closed": "Le moniteur a fermé la connexion d'appairage.",
+      "invalid_code_new_code": "Code erroné. Le moniteur affiche maintenant un nouveau code : saisissez-le exactement.",
+      "cloud_invalid_response": "Le service Aiphone a renvoyé une réponse inattendue. Réessayez ; si le problème persiste, recommencez l'appairage."
+    },
+    "abort": {
+      "already_configured": "Ce moniteur est déjà appairé avec Home Assistant.",
+      "fingerprint_rejected": "Appairage annulé : le certificat n'a pas été approuvé. Rien n'a été envoyé au moniteur.",
+      "reauth_successful": "Le moniteur est à nouveau appairé.",
+      "reconfigure_successful": "Le moniteur est à nouveau appairé.",
+      "wrong_monitor": "Ce n'est pas le moniteur appairé avec cette entrée. Appairez le moniteur d'origine, ou ajoutez le nouveau comme une nouvelle intégration."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Ouverture des portes",
+        "description": "Les ouvertures passent par une courte session de surveillance portée par une platine de rue. Si elle est occupée, les autres platines sont essayées.",
+        "data": {
+          "station": "Platine de rue préférée"
+        }
+      }
+    },
+    "abort": {
+      "no_stations": "Aucune platine de rue à caméra n'est encore connue. Rechargez l'intégration quand le cloud est joignable."
+    }
+  },
+  "selector": {
+    "method": {
+      "options": {
+        "discover": "Rechercher sur le réseau local",
+        "manual": "Saisir l'adresse du moniteur"
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "ringing": {
+        "name": "Sonnerie en cours"
+      }
+    },
+    "button": {
+      "large_opening": {
+        "name": "Grande ouverture"
+      },
+      "small_opening": {
+        "name": "Petite ouverture"
+      }
+    },
+    "event": {
+      "ring": {
+        "name": "Sonnerie",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "ring": "Sonnerie"
+            }
+          },
+          "station": {
+            "name": "Platine de rue"
+          }
+        }
+      }
+    },
+    "sensor": {
+      "last_station": {
+        "name": "Dernière platine ayant sonné",
+        "state_attributes": {
+          "rang_at": {
+            "name": "Heure de la sonnerie"
+          }
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "invalid_credentials": {
+      "message": "L'identité enregistrée est invalide ou expirée. Appairez à nouveau le moniteur."
+    },
+    "cloud_unavailable": {
+      "message": "Le service Aiphone est injoignable. Home Assistant réessaiera automatiquement."
+    },
+    "no_station": {
+      "message": "Aucune platine de rue à caméra n'est connue : les ouvertures en ont besoin. Rechargez l'intégration quand le cloud est joignable."
+    },
+    "not_connected": {
+      "message": "Pas de connexion avec le moniteur. Home Assistant se reconnecte automatiquement ; réessayez dans un instant."
+    },
+    "command_timeout": {
+      "message": "Le moniteur n'a pas répondu à temps. Réessayez."
+    },
+    "command_rejected": {
+      "message": "Le moniteur a refusé l'ouverture ({code}). Réessayez dans quelques secondes."
+    },
+    "command_failed": {
+      "message": "L'ouverture a échoué ({code}). Réessayez."
+    },
+    "station_busy": {
+      "message": "Toutes les platines de rue sont occupées (appel ou surveillance en cours). Réessayez dans quelques secondes."
+    },
+    "manual_removal_title": {
+      "message": "Aiphone JO : retirer le terminal du moniteur"
+    },
+    "manual_removal": {
+      "message": "Home Assistant n'a pas pu désenregistrer le terminal **{name}** du moniteur. Il occupe toujours une place de smartphone : sur le moniteur, ouvrez les réglages smartphone et supprimez **{name}**."
+    },
+    "credentials_expired": {
+      "message": "L'identité du moniteur a expiré. Appairez à nouveau le moniteur."
+    },
+    "auth_refused": {
+      "message": "Le service Aiphone n'accepte plus ce terminal (il a peut-être été supprimé du moniteur). Appairez à nouveau le moniteur."
+    }
+  }
+}

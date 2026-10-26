@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - custom_components/aiphone_jo/manifest.json
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Tag and publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Detect version change
+        id: version
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          version="$(python scripts/release_tools.py version)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "Tag v$version already exists, nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "::warning::Previous commit unavailable, skipping release of v$version."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          previous="$(git show "$BEFORE:custom_components/aiphone_jo/manifest.json" \
+            | python -c 'import json, sys; print(json.load(sys.stdin)["version"])')"
+          if [ "$previous" = "$version" ]; then
+            echo "Version unchanged ($version), nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version changed: $previous -> $version."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check release metadata
+        if: steps.version.outputs.release == 'true'
+        run: python scripts/release_tools.py check
+
+      - name: Create tag and GitHub Release
+        if: steps.version.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python scripts/release_tools.py notes "$VERSION" > "$RUNNER_TEMP/notes.md"
+          gh release create "v$VERSION" \
+            --target "$GITHUB_SHA" \
+            --title "v$VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md"

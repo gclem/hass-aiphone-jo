@@ -1,0 +1,19 @@
+{
+  "domain": "aiphone_jo",
+  "name": "Aiphone JO",
+  "codeowners": [
+    "@gclem"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "network"
+  ],
+  "documentation": "https://github.com/gclem/hass-aiphone-jo",
+  "integration_type": "device",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/gclem/hass-aiphone-jo/issues",
+  "requirements": [
+    "aiomqtt>=2.3"
+  ],
+  "version": "0.2.1"
+}
