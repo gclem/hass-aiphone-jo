@@ -60,6 +60,7 @@ from .models import (
     KeyInfo,
     LockStatus,
     MessageEvent,
+    Output,
     RingEvent,
     SessionEndedBy,
     SessionEndedEvent,
@@ -67,7 +68,7 @@ from .models import (
 from .pairing import LocalLink, PairingFlow, PairingStep, PeerCertificate, inspect_peer
 from .redact import redact
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 __all__ = [
     "APP_CODE_INCOMPATIBLE",
@@ -105,6 +106,7 @@ __all__ = [
     "MonitorSession",
     "NoMonitorFoundError",
     "NotConnectedError",
+    "Output",
     "PairingCloudError",
     "PairingError",
     "PairingFailureReason",

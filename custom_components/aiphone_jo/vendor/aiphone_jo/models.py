@@ -8,17 +8,47 @@ from enum import StrEnum
 from typing import Any
 
 
-class Gate(StrEnum):
+class Output(StrEnum):
     """Lock outputs of the JO-1MDW.
 
-    ``MAIN`` = UNLOCK_REQ 26021, pulse on output 1 (for example the large
-    opening of a gate). ``OPTION`` = OUT_OPTION_REQ 26121, output 2 (for
-    example a small opening). Both are only honoured during a monitoring
-    session.
+    ``UNLOCK`` = output 1 (UNLOCK_REQ 26021) and ``OPTION`` = output 2, the
+    option output (OUT_OPTION_REQ 26121). Each command sends a pulse on the
+    output; what it opens depends on how the installation is wired. Both are
+    only honoured during a monitoring session.
+
+    ``MAIN`` is an alias of ``UNLOCK`` kept for compatibility (``Gate.MAIN``).
     """
 
-    MAIN = "main"
+    UNLOCK = "main"
     OPTION = "option"
+    MAIN = "main"
+
+    @property
+    def number(self) -> int:
+        """Output number: 1 for ``UNLOCK``, 2 for ``OPTION``."""
+        return 1 if self is Output.UNLOCK else 2
+
+    @classmethod
+    def from_number(cls, number: int) -> Output:
+        """Output 1 or 2."""
+        if number == 1:
+            return cls.UNLOCK
+        if number == 2:
+            return cls.OPTION
+        raise ValueError(f"Invalid lock output {number!r}: expected 1 or 2.")
+
+    @classmethod
+    def coerce(cls, value: Output | str | int) -> Output:
+        """Accept an :class:`Output`, its value (``"main"``/``"option"``) or 1/2."""
+        if isinstance(value, bool):
+            raise ValueError(f"Invalid lock output {value!r}.")
+        if isinstance(value, int):
+            return cls.from_number(value)
+        return cls(value)
+
+
+# Backward-compatible name: ``Gate.MAIN`` and ``Gate.OPTION`` keep working.
+Gate = Output
 
 
 @dataclass(frozen=True, slots=True)

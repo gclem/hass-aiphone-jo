@@ -33,8 +33,8 @@ from .models import (
     AiphoneEvent,
     CallUpdatedEvent,
     ConnectionStateEvent,
-    Gate,
     MessageEvent,
+    Output,
     RingEvent,
     SessionEndedEvent,
 )
@@ -213,13 +213,21 @@ async def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _selected_output(args: argparse.Namespace) -> Output:
+    if args.big or args.small:
+        old, new = ("--big", "--output 1") if args.big else ("--small", "--output 2")
+        sys.stderr.write(f"Warning: {old} is deprecated, use {new}.\n")
+        return Output.UNLOCK if args.big else Output.OPTION
+    return Output.from_number(args.output)
+
+
 async def cmd_open(args: argparse.Namespace) -> int:
-    gate = Gate.OPTION if args.small else Gate.MAIN
-    label = "small opening (output 2)" if args.small else "large opening (output 1)"
-    _print(f"This starts a monitoring session on station {args.terminal} and opens the {label}.")
-    await _confirm("Really open the door?", args, OPEN_CONFIRMATION)
+    output = _selected_output(args)
+    label = "output 1 (unlock)" if output is Output.UNLOCK else "output 2 (option output)"
+    _print(f"This starts a monitoring session on station {args.terminal} and pulses {label}.")
+    await _confirm("Really activate this lock output?", args, OPEN_CONFIRMATION)
     async with _client(args) as client:
-        await client.open_door(gate, args.terminal)
+        await client.open_door(output, args.terminal)
     _print("Command accepted by the entrance station.")
     return 0
 
@@ -294,10 +302,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub.add_parser("rooms", help="list terminals (/getRoomInfo)")
     sub.add_parser("status", help="lock status (26031)")
-    open_parser = sub.add_parser("open", help="open the door (monitoring session + 26021/26121)")
+    open_parser = sub.add_parser(
+        "open", help="pulse a lock output (monitoring session + 26021/26121)"
+    )
     which = open_parser.add_mutually_exclusive_group(required=True)
-    which.add_argument("--big", action="store_true", help="output 1, large opening (26021)")
-    which.add_argument("--small", action="store_true", help="output 2, small opening (26121)")
+    which.add_argument(
+        "--output",
+        type=int,
+        choices=(1, 2),
+        help="1 = unlock (26021), 2 = option output (26121); the effect depends on the wiring",
+    )
+    # Deprecated aliases of --output 1 / --output 2, hidden from the help.
+    which.add_argument("--big", action="store_true", help=argparse.SUPPRESS)
+    which.add_argument("--small", action="store_true", help=argparse.SUPPRESS)
     open_parser.add_argument("--terminal", type=int, required=True, help="camera station id")
     watch = sub.add_parser("ring-watch", help="print rings and events")
     watch.add_argument("--duration", type=float, default=0, help="seconds (0 = until Ctrl+C)")

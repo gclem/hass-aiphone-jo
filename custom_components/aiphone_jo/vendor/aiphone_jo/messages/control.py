@@ -47,7 +47,7 @@ def _main_unit_ctrl(
 def build_unlock_request(
     credentials: CloudCredentials, now: datetime | None = None
 ) -> OutboundMessage:
-    """UNLOCK_REQ (26021 -> 27021): pulse on lock output 1 (main/large opening)."""
+    """UNLOCK_REQ (26021 -> 27021): pulse on lock output 1."""
     return _main_unit_ctrl(Mid.UNLOCK_REQ, Mid.UNLOCK_REP, "UNLOCK_REQ", credentials, now)
 
 
@@ -61,7 +61,7 @@ def build_lock_request(
 def build_out_option_request(
     credentials: CloudCredentials, now: datetime | None = None
 ) -> OutboundMessage:
-    """OUT_OPTION_REQ (26121 -> 27121): "Option Output", lock output 2 (small opening).
+    """OUT_OPTION_REQ (26121 -> 27121): pulse on lock output 2, the option output.
 
     Same envelope as 26021, with an empty BODY and no entrance selector.
     """

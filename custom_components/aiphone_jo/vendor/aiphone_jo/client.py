@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import warnings
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -72,10 +73,10 @@ from .models import (
     CallStatus,
     CallUpdatedEvent,
     ConnectionStateEvent,
-    Gate,
     IncomingCall,
     LockStatus,
     MessageEvent,
+    Output,
     RingEvent,
     SessionEndedBy,
     SessionEndedEvent,
@@ -101,6 +102,18 @@ class _Waiter:
 
 def _rslt(message: Message) -> Any:
     return header(message).get("RSLT")
+
+
+def _resolve_output(output: Output | str | int, gate: Output | None) -> Output:
+    if gate is not None:
+        warnings.warn(
+            "The 'gate' keyword is deprecated, use 'output'.", DeprecationWarning, stacklevel=3
+        )
+        output = gate
+    try:
+        return Output.coerce(output)
+    except ValueError as err:
+        raise InvalidInputError(str(err)) from err
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -182,7 +195,7 @@ class RelaySession:
         """``UPDATE_RCV_USER_REQ`` (30012 -> 31012) with our complete SDP answer."""
         await self._relay(RelayCommand.UPDATE_RCV_USER, sdp)
 
-    async def _gate(self, message: OutboundMessage) -> None:
+    async def _output(self, message: OutboundMessage) -> None:
         self._require_active()
         reply = await self._client.request(message)
         if _rslt(reply) != 0:
@@ -193,16 +206,21 @@ class RelaySession:
             )
 
     async def unlock(self) -> None:
-        """``UNLOCK_REQ`` 26021 -> 27021: lock output 1 (large opening)."""
-        await self._gate(build_unlock_request(self._client.credentials))
+        """``UNLOCK_REQ`` 26021 -> 27021: pulse on lock output 1."""
+        await self._output(build_unlock_request(self._client.credentials))
 
     async def out_option(self) -> None:
-        """``OUT_OPTION_REQ`` 26121 -> 27121: lock output 2 (small opening)."""
-        await self._gate(build_out_option_request(self._client.credentials))
+        """``OUT_OPTION_REQ`` 26121 -> 27121: pulse on lock output 2 (option output)."""
+        await self._output(build_out_option_request(self._client.credentials))
 
-    async def open(self, gate: Gate = Gate.MAIN) -> None:
-        """Pulse the given lock output."""
-        if Gate(gate) is Gate.MAIN:
+    async def open(
+        self, output: Output | str | int = Output.UNLOCK, *, gate: Output | None = None
+    ) -> None:
+        """Pulse a lock output: :attr:`Output.UNLOCK` (1) or :attr:`Output.OPTION` (2).
+
+        ``gate`` is a deprecated alias of ``output``.
+        """
+        if _resolve_output(output, gate) is Output.UNLOCK:
             await self.unlock()
         else:
             await self.out_option()
@@ -702,24 +720,29 @@ class AiphoneJoClient:
 
     async def open_door(
         self,
-        gate: Gate = Gate.MAIN,
+        output: Output | str | int = Output.UNLOCK,
         terminal: Terminal | int | None = None,
         term_kind: int = TERM_KIND_ENTRANCE_STATION,
+        *,
+        gate: Output | None = None,
     ) -> None:
         """Pulse a lock output: reuse the open session, or open a short monitoring one.
 
-        ``Gate.MAIN`` = UNLOCK_REQ 26021 (output 1, large opening);
-        ``Gate.OPTION`` = OUT_OPTION_REQ 26121 (output 2, small opening). A
+        ``output`` is :attr:`Output.UNLOCK` (or ``1``: UNLOCK_REQ 26021, output
+        1) or :attr:`Output.OPTION` (or ``2``: OUT_OPTION_REQ 26121, option
+        output 2); what each output opens depends on the installation. A
         temporary session is always closed (30031 then 23003), even on error.
+        ``gate`` is a deprecated alias of ``output``.
         """
+        selected = _resolve_output(output, gate)
         current = self.active_session
         if current is not None:
-            await current.open(gate)
+            await current.open(selected)
             return
         if terminal is None:
             raise InvalidInputError("A camera entrance station is required to open a session.")
         async with self.monitor(terminal, term_kind) as session:
-            await session.open(gate)
+            await session.open(selected)
 
     async def answer_call(self, call: IncomingCall | None = None) -> CallSession:
         """**Experimental**: take over the ringing call (reuses the ring ``CID``).

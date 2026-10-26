@@ -2,11 +2,12 @@
 
 All notable changes to this integration.
 
-## Unreleased
+## 0.2.2
 
 - The output buttons are now named **Action 1** (output 1, unlock) and
   **Action 2** (output 2, option), since their effect depends on each
   installation. Existing entities are kept; only their default name changes.
+- Update the aiphone-jo library to 0.2.2.
 
 ## 0.2.1
 
