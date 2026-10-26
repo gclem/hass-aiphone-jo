@@ -2,7 +2,7 @@
 
 All notable changes to this integration.
 
-## Unreleased
+## 0.4.1
 
 - Experimental snapshot on ring, disabled by default: each ring captures an
   image of the visitor without answering, shown by the new Last visitor image
@@ -18,6 +18,7 @@ All notable changes to this integration.
   the visitor"): when a call is answered, the camera live view offers the
   microphone with Home Assistant's two-way audio preview feature. Needs the
   go2rtc server run by Home Assistant.
+- Update the aiphone-jo library to 0.4.1.
 
 ## 0.4.0
 

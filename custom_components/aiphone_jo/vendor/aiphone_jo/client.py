@@ -304,6 +304,7 @@ class CallSession(RelaySession):
     :meth:`add_send_audio` (30021, our microphone), :meth:`reply` (24002),
     then :meth:`start` (23008 RSLT 200) to pick up, or :meth:`reject`.
     :meth:`AiphoneJoClient.answer_call` runs the whole sequence.
+    :meth:`withdraw` leaves the relay without answering nor declining.
 
     ``first_answer`` is ``True`` when the station confirmed (25001) that this
     client answered first, ``False`` when another phone did.
@@ -382,8 +383,17 @@ class CallSession(RelaySession):
         self._client._end_call(self.call, CallStatus.ENDED, CallEndReason.ENDED_BY_CLIENT)
         return steps
 
-    async def _withdraw(self) -> None:
-        """Leave the relay (30031) without ending the call for the other phones."""
+    async def withdraw(self) -> dict[str, Any]:
+        """Leave the relay (``LEAVE_USER_REQ`` 30031 only) without answering or declining.
+
+        No 24001, 24002, 23008 nor 23003 is sent: a call that is still ringing
+        keeps ringing on the other phones and can be answered again later. Use
+        it, for example, to grab a picture of the visitor with
+        :meth:`request_offer` / :meth:`send_answer` while the call rings.
+        Errors are logged, the local state is always reset. Returns the
+        ``RSLT`` (or error text) of the step.
+        """
+        steps: dict[str, Any] = {}
         if self.active:
             self._client._detach_session(self, SessionEndedBy.CLIENT)
             leave = build_relay_request(
@@ -393,17 +403,32 @@ class CallSession(RelaySession):
                 cor_cli_id=self.cor_cli_id,
             )
             try:
-                await self._client.request(leave, cid=self.cid, timeout=END_SESSION_STEP_TIMEOUT)
+                reply = await self._client.request(
+                    leave, cid=self.cid, timeout=END_SESSION_STEP_TIMEOUT
+                )
+                steps["leave"] = _rslt(reply)
             except AiphoneJoError as err:
+                steps["leave"] = f"error: {err}"
                 _LOGGER.warning("Incomplete withdrawal from the call: %s", err)
         self._release()
+        self._client._check_call_expiry(self.call)
+        return steps
+
+    async def _withdraw(self) -> dict[str, Any]:
+        """Deprecated alias of :meth:`withdraw`."""
+        warnings.warn(
+            "CallSession._withdraw() is deprecated, use withdraw().",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return await self.withdraw()
 
     async def _abort(self) -> None:
         """Tear down after a failed answer: hang up if the call is ours, else withdraw."""
         if self.active and (self.call.status is CallStatus.TALKING or self.first_answer):
             await self.close()
         else:
-            await self._withdraw()
+            await self.withdraw()
 
     async def reject(self) -> None:
         """Decline: ``CALL_STA_REQ`` (23008, RSLT 603) then ``LEAVE_USER_REQ``."""
@@ -1173,6 +1198,12 @@ class AiphoneJoClient:
     def _expire_call(self, call: IncomingCall) -> None:
         if call.status is CallStatus.RINGING and not call.engaged:
             self._end_call(call, CallStatus.EXPIRED, CallEndReason.EXPIRED)
+
+    def _check_call_expiry(self, call: IncomingCall) -> None:
+        # The ring timer skips engaged calls: expire on release if it already elapsed.
+        elapsed = (datetime.now().astimezone() - call.ringing_at).total_seconds()
+        if elapsed >= self._ring_timeout:
+            self._expire_call(call)
 
     def _set_call_status(
         self, call: IncomingCall, status: CallStatus, reason: CallEndReason | None = None
