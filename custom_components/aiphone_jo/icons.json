@@ -25,6 +25,16 @@
         "default": "mdi:phone-cancel"
       }
     },
+    "camera": {
+      "camera": {
+        "default": "mdi:doorbell-video"
+      }
+    },
+    "image": {
+      "last_visitor": {
+        "default": "mdi:doorbell-video"
+      }
+    },
     "sensor": {
       "last_station": {
         "default": "mdi:doorbell-video"
@@ -38,11 +48,6 @@
           "rejected": "mdi:phone-cancel",
           "failed": "mdi:phone-alert"
         }
-      }
-    },
-    "camera": {
-      "camera": {
-        "default": "mdi:doorbell-video"
       }
     }
   }

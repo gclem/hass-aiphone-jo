@@ -4,6 +4,11 @@ All notable changes to this integration.
 
 ## Unreleased
 
+- Experimental snapshot on ring, disabled by default: each ring captures an
+  image of the visitor without answering, shown by the new Last visitor image
+  entity and the camera. Every ring also fires an `aiphone_jo_ring` event,
+  with a link to the image, for notifications with a photo (example in the
+  README).
 - Experimental call answering, disabled by default: Answer, Hang up and Reject
   buttons and a Call state sensor. An answered call shows the visitor with
   sound in the camera live view. Calls are hung up automatically after 200

@@ -75,6 +75,10 @@ class NoStationError(AiphoneJoError):
     """No entrance station with a camera is known."""
 
 
+class MediaBusyError(AiphoneJoError):
+    """A live view uses the monitoring session."""
+
+
 class CameraMedia:
     """Shared live session, viewers and cached still images."""
 
@@ -362,6 +366,77 @@ class CameraMedia:
             self._call_session = None
             await self._async_stop(notice="call_ended")
         await self._async_close_call_stream()
+
+    # ------------------------------------------------------- ring images
+
+    async def async_ring_image(self, call: Any, limit: float) -> bytes:
+        """Image of the visitor while a call rings, without answering it.
+
+        An answered call is read from its stream. Otherwise the ringing call's
+        session is taken over just long enough to receive its video (no
+        READY, REPLY, reject nor hang-up), then left with LEAVE_USER only, so
+        the call keeps ringing everywhere and can still be answered.
+        """
+        bridge = self._bridge
+        if not self.available or bridge is None:
+            raise Go2RtcError("Video is unavailable")
+        lock = self._runtime.session_lock
+        async with asyncio.timeout(limit):
+            # Waits for an answer in progress, whose stream is then read.
+            await lock.acquire()
+        session: Any = None
+        try:
+            if self._call_session is not None and self._call_stream is not None:
+                stream = self._call_stream
+                lock.release()
+                lock = None
+                async with asyncio.timeout(limit):
+                    await bridge.async_wait_video(limit, stream=stream)
+                    image = await bridge.async_frame(stream)
+            else:
+                if self._live is not None:
+                    raise MediaBusyError("A live view is open")
+                client: Any = self._runtime.client
+                stream = bridge.ring_stream
+                async with asyncio.timeout(limit):
+                    session = await client.answer_call(call)
+                    await bridge.async_create_stream(stream, PLACEHOLDER_SOURCE)
+                    offer = await session.request_offer()
+                    await session.send_answer(await bridge.async_ingest(offer, stream))
+                    await bridge.async_wait_video(limit, stream=stream)
+                    image = await bridge.async_frame(stream)
+        finally:
+            try:
+                if session is not None:
+                    await self._async_leave_ring_fully(session, bridge)
+            finally:
+                if lock is not None:
+                    lock.release()
+        self._store(image)
+        return image
+
+    async def _async_leave_ring_fully(self, session: Any, bridge: Go2RtcBridge) -> None:
+        """Leave the call before the locks are released, even if cancelled again."""
+        leave = asyncio.ensure_future(self._async_leave_ring(session, bridge))
+        cancelled = False
+        while not leave.done():
+            try:
+                await asyncio.shield(leave)
+            except asyncio.CancelledError:
+                cancelled = True
+        if cancelled:
+            raise asyncio.CancelledError
+
+    @staticmethod
+    async def _async_leave_ring(session: Any, bridge: Go2RtcBridge) -> None:
+        # Never reject nor hang up: that would end the call for every phone.
+        leave = getattr(session, "withdraw", None) or session._withdraw
+        try:
+            await leave()
+        except AiphoneJoError as err:
+            _LOGGER.debug("Leaving the ringing call failed: %s", err)
+        with contextlib.suppress(Go2RtcError):
+            await bridge.async_delete_stream(bridge.ring_stream)
 
     # ------------------------------------------------------------ images
 

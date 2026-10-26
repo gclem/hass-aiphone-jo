@@ -22,6 +22,7 @@ from custom_components.aiphone_jo.const import (
     CONF_GO2RTC_USERNAME,
     CONF_IMAGE_REFRESH,
     CONF_MONITOR,
+    CONF_RING_SNAPSHOT,
     CONF_STATION,
     CONF_STATIONS,
     DOMAIN,
@@ -734,6 +735,7 @@ async def test_options(hass: HomeAssistant, config_entry: MockConfigEntry) -> No
         CONF_IMAGE_REFRESH: 30,
         CONF_CALL_ANSWERING: False,
         CONF_CALL_TALK: False,
+        CONF_RING_SNAPSHOT: False,
     }
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {CONF_STATION: "102", CONF_IMAGE_REFRESH: 120}
@@ -744,6 +746,7 @@ async def test_options(hass: HomeAssistant, config_entry: MockConfigEntry) -> No
         CONF_IMAGE_REFRESH: 120,
         CONF_CALL_ANSWERING: False,
         CONF_CALL_TALK: False,
+        CONF_RING_SNAPSHOT: False,
     }
 
 
@@ -798,6 +801,7 @@ async def test_options_without_stations(
         CONF_IMAGE_REFRESH: 30,
         CONF_CALL_ANSWERING: False,
         CONF_CALL_TALK: False,
+        CONF_RING_SNAPSHOT: False,
     }
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {CONF_IMAGE_REFRESH: 60}
@@ -806,6 +810,7 @@ async def test_options_without_stations(
         CONF_IMAGE_REFRESH: 60,
         CONF_CALL_ANSWERING: False,
         CONF_CALL_TALK: False,
+        CONF_RING_SNAPSHOT: False,
     }
 
 
@@ -839,6 +844,7 @@ async def test_options_go2rtc_url(
         CONF_IMAGE_REFRESH: 30,
         CONF_CALL_ANSWERING: False,
         CONF_CALL_TALK: False,
+        CONF_RING_SNAPSHOT: False,
         CONF_GO2RTC_URL: url,
         CONF_GO2RTC_USERNAME: "user",
         CONF_GO2RTC_PASSWORD: "example-password",

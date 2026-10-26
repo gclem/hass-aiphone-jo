@@ -151,6 +151,22 @@ class CallController:
 
     async def async_answer(self) -> None:
         """Answer the ringing call: the camera shows the visitor."""
+        self._check_ringing()
+        snapshots = self._runtime.snapshots
+        # The ring image is then taken from the answered call.
+        resume = await snapshots.async_interrupt()
+        try:
+            await self._async_answer()
+        finally:
+            snapshots.async_resume(resume)
+
+    def _check_ringing(self) -> None:
+        if not self.enabled:
+            raise _error("call_answering_disabled")
+        if self.state is not CallState.RINGING or self._call is None:
+            raise _error("call_not_ringing")
+
+    async def _async_answer(self) -> None:
         call = self._call
         if not self.enabled:
             raise _error("call_answering_disabled")
@@ -225,6 +241,15 @@ class CallController:
 
     async def async_reject(self) -> None:
         """Decline the ringing call."""
+        self._check_ringing()
+        snapshots = self._runtime.snapshots
+        resume = await snapshots.async_interrupt()
+        try:
+            await self._async_reject()
+        finally:
+            snapshots.async_resume(resume)
+
+    async def _async_reject(self) -> None:
         call = self._call
         if not self.enabled:
             raise _error("call_answering_disabled")

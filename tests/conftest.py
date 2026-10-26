@@ -39,6 +39,7 @@ from custom_components.aiphone_jo.vendor.aiphone_jo import (
     PairingStep,
     PeerCertificate,
     RoomInfo,
+    SessionError,
     Terminal,
     UntrustedPeerError,
     pairing_reason,
@@ -414,19 +415,30 @@ class FakeCallSession:
     async def close(self) -> dict[str, Any]:
         self.steps.append("close")
         self.active = False
+        self.client.call_session_open = False
         self.call.status = CallStatus.ENDED
         return {}
+
+    async def _withdraw(self) -> None:
+        """Leave the relay only (LEAVE_USER): the call keeps ringing."""
+        self.steps.append("withdraw")
+        if self.client.withdraw_delay:
+            await asyncio.sleep(self.client.withdraw_delay)
+        self.active = False
+        self.client.call_session_open = False
 
     async def abort(self) -> None:
         if self.call.status is CallStatus.TALKING or self.first_answer:
             await self.close()
         else:
-            self.steps.append("withdraw")
-            self.active = False
+            await self._withdraw()
 
     async def reject(self) -> None:
         self._step("reject")
         self.active = False
+        self.client.call_session_open = False
+        self.call.status = CallStatus.REJECTED
+        self.client.emit(CallUpdatedEvent(self.call))
 
 
 class FakeClient:
@@ -449,6 +461,10 @@ class FakeClient:
         self.call_sessions: list[FakeCallSession] = []
         self.call_errors: dict[str, BaseException] = {}
         self.call_start_result = True
+        # Like the library: one engaged call session at a time, released when
+        # the session leaves; leaving can take a while (``withdraw_delay``).
+        self.call_session_open = False
+        self.withdraw_delay = 0.0
         self.live_monitor = self._live_monitor
 
     def _live_monitor(
@@ -467,6 +483,9 @@ class FakeClient:
         """Same sequence and teardown as the library's ``answer_call``."""
         if error := self.call_errors.get("answer_call"):
             raise error
+        if self.call_session_open:
+            raise SessionError("A session is already open: close it first.")
+        self.call_session_open = True
         session = FakeCallSession(self, call)
         self.call_sessions.append(session)
         if negotiate is None:

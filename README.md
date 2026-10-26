@@ -48,6 +48,7 @@ All entities belong to one device, the monitor.
 | `button` | Action 1 | Pulses output 1 of the monitor (unlock output). |
 | `button` | Action 2 | Pulses output 2 of the monitor (option output). |
 | `camera` | Camera | Image and live view of the entrance station chosen in the options. |
+| `image` | Last visitor | Image captured at the last ring, with `station` and `ringing_at` (only with the snapshot on ring option). |
 
 What each output does depends on your installation: a door strike, a gate
 motor, lighting or any other equipment wired to it. Rename the buttons in Home
@@ -102,6 +103,41 @@ start.
 
 If go2rtc cannot be reached, the camera is unavailable and a repair notice
 explains what to do; the other entities keep working.
+
+### Snapshot on ring (experimental)
+
+Disabled by default. When enabled in the options, each ring captures an image
+of the visitor from the call itself, without answering it: the integration
+receives the call's video for a few seconds, keeps one image, then leaves the
+call. The call keeps ringing on the monitor and the other phones, and can
+still be answered. The image is shown by the **Last visitor** entity and by
+the camera. If the call is answered from Home Assistant meanwhile, the image
+is taken from the answered call.
+
+Every ring also fires an `aiphone_jo_ring` event, with `station`, `raw_name`,
+`ringing_at`, `device_id`, `snapshot` (true when an image was captured),
+`image_entity_id` and `image_url`. With the option, the event is fired once
+the capture is done (a few seconds, at most about 12); without it, right
+away. Example of a notification with the image, for the Home Assistant
+companion app:
+
+```yaml
+automation:
+  - alias: Visitor at the door
+    triggers:
+      - trigger: event
+        event_type: aiphone_jo_ring
+    actions:
+      - action: notify.mobile_app_my_phone
+        data:
+          title: "Someone is at the door"
+          message: "{{ trigger.event.data.station }}"
+          data:
+            image: "{{ trigger.event.data.image_url }}"
+```
+
+If no image could be captured, `image_url` is empty and the notification is
+sent without it.
 
 ### Call answering (experimental)
 
@@ -206,8 +242,8 @@ Every error message says what to do. The most common cases:
 - the camera image refresh interval (30 seconds by default, 10 to 3600);
 - the URL of a go2rtc server, with optional credentials, when Home Assistant
   does not run go2rtc itself (Home Assistant Core installations);
-- call answering, and talking to the visitor (both experimental, disabled by
-  default).
+- the snapshot on ring, call answering, and talking to the visitor (all
+  experimental, disabled by default).
 
 Changes apply immediately, without restarting Home Assistant.
 
@@ -232,8 +268,11 @@ name to delete.
 
 - **Doorbell detection is experimental.** Ring events may be missed or
   delayed; please report whether they work with your installation.
-- Call answering and talking to the visitor are experimental and have not
-  been validated on real hardware yet. Output status is not available yet.
+- Call answering, talking to the visitor and the snapshot on ring are
+  experimental and have not been validated on real hardware yet. The snapshot
+  on ring receives the call's video without answering; if the entrance
+  station only sends video to an answered call, no image is captured. No
+  image is captured while the camera live view is open. Output status is not available yet.
 - The live view is interrupted for a few seconds about every minute, when the
   entrance station's session is renewed. Audio is one-way (from the entrance
   station).

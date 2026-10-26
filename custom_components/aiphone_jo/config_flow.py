@@ -52,6 +52,7 @@ from .const import (
     CONF_GO2RTC_USERNAME,
     CONF_IMAGE_REFRESH,
     CONF_MONITOR,
+    CONF_RING_SNAPSHOT,
     CONF_STATION,
     CONF_STATIONS,
     CONF_SYSTEM_VERSION,
@@ -586,7 +587,7 @@ class AiphoneJoOptionsFlow(OptionsFlow):
             }
             if CONF_STATION in user_input:
                 options[CONF_STATION] = int(user_input[CONF_STATION])
-            for key in (CONF_CALL_ANSWERING, CONF_CALL_TALK):
+            for key in (CONF_RING_SNAPSHOT, CONF_CALL_ANSWERING, CONF_CALL_TALK):
                 options[key] = bool(user_input.get(key, False))
             if url := str(user_input.get(CONF_GO2RTC_URL) or "").strip():
                 options[CONF_GO2RTC_URL] = url
@@ -629,7 +630,7 @@ class AiphoneJoOptionsFlow(OptionsFlow):
                 unit_of_measurement="s",
             )
         )
-        for key in (CONF_CALL_ANSWERING, CONF_CALL_TALK):
+        for key in (CONF_RING_SNAPSHOT, CONF_CALL_ANSWERING, CONF_CALL_TALK):
             schema[vol.Required(key, default=bool(current.get(key, False)))] = (
                 BooleanSelector()
             )

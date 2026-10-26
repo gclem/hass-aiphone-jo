@@ -17,6 +17,7 @@ from .call import CallController
 from .const import CONF_STATION, DOMAIN
 from .media import CameraMedia
 from .names import StationNamer
+from .snapshot import RingSnapshots
 from .vendor.aiphone_jo import (
     AiphoneEvent,
     AiphoneJoClient,
@@ -82,6 +83,9 @@ class AiphoneJoRuntime:
         self.calls = CallController(
             hass, self, lambda: async_dispatcher_send(hass, update)
         )
+        self.snapshots = RingSnapshots(
+            hass, self, lambda: async_dispatcher_send(hass, update)
+        )
         self._remove_listener = client.add_listener(self._handle_event)
 
     @property
@@ -92,6 +96,7 @@ class AiphoneJoRuntime:
     async def async_stop(self) -> None:
         """Stop listening and disconnect."""
         self._remove_listener()
+        await self.snapshots.async_shutdown()
         await self.calls.async_shutdown()
         await self.media.async_shutdown()
         await self.client.disconnect()
@@ -123,6 +128,7 @@ class AiphoneJoRuntime:
             self.last_ring = Ring(self.station_name(event.call), event.call.ringing_at)
             async_dispatcher_send(self.hass, signal_ring(entry_id), self.last_ring)
             async_dispatcher_send(self.hass, signal_update(entry_id))
+            self.snapshots.async_handle_ring(event.call, self.last_ring.station)
         elif isinstance(event, CallUpdatedEvent):
             answered_or_over = event.call.status is not CallStatus.RINGING
             if event.call is self._call and answered_or_over and self.ringing:

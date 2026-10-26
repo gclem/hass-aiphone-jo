@@ -113,6 +113,7 @@ class Go2RtcBridge:
         self.stream = stream
         self.relay = f"{stream}_live"
         self.call_stream = f"{stream}_call"
+        self.ring_stream = f"{stream}_ring"
         # A stream name as ffmpeg input makes go2rtc read it from its own RTSP
         # listener on the loopback address, where no RTSP credentials apply.
         self.relay_source = (

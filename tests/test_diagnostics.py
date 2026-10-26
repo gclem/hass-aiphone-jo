@@ -70,5 +70,6 @@ async def test_diagnostics_of_paired_monitor(
         "camera_available": False,
         "call_answering": False,
         "call_talk": False,
+        "ring_snapshot": False,
         "call_state": "idle",
     }

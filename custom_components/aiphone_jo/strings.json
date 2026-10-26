@@ -115,12 +115,14 @@
           "go2rtc_url": "go2rtc URL (optional)",
           "go2rtc_username": "go2rtc username (optional)",
           "go2rtc_password": "go2rtc password (optional)",
+          "ring_snapshot": "Snapshot on ring (experimental)",
           "call_answering": "Call answering (experimental)",
           "call_talk": "Talk to the visitor (experimental)"
         },
         "data_description": {
           "image_refresh_interval": "Minimum time between two camera images (10 to 3600 seconds). The image is only refreshed while it is displayed, and each refresh opens a monitoring session on the entrance station.",
           "go2rtc_url": "Leave empty to use the go2rtc server run by Home Assistant (Home Assistant OS and Container). Set it for a Home Assistant Core installation or an external go2rtc, for example http://192.0.2.10:1984.",
+          "ring_snapshot": "Captures an image of the visitor each time a station rings, without answering: the call keeps ringing on every phone. The image is shown by the Last visitor entity and the camera, and linked in the aiphone_jo_ring event for notifications. Experimental: not yet validated on real hardware.",
           "call_answering": "Adds Answer, Hang up and Reject buttons and a call state sensor. When you answer, the camera live view shows and plays the visitor; to talk to the visitor, also enable the next option. Experimental: not yet validated on real hardware. A call is hung up automatically after 200 seconds, like in the official application.",
           "call_talk": "With call answering, lets you talk to the visitor from the camera live view, with Home Assistant's two-way audio (a preview feature of recent versions). Needs the go2rtc server run by Home Assistant. Experimental: not yet validated on real hardware; disable it if answering fails."
         }
@@ -162,6 +164,11 @@
         "name": "Reject"
       }
     },
+    "camera": {
+      "camera": {
+        "name": "Camera"
+      }
+    },
     "event": {
       "ring": {
         "name": "Ring",
@@ -176,6 +183,19 @@
           },
           "raw_name": {
             "name": "Original name"
+          }
+        }
+      }
+    },
+    "image": {
+      "last_visitor": {
+        "name": "Last visitor",
+        "state_attributes": {
+          "station": {
+            "name": "Entrance station"
+          },
+          "ringing_at": {
+            "name": "Ringing at"
           }
         }
       }
@@ -224,11 +244,6 @@
             }
           }
         }
-      }
-    },
-    "camera": {
-      "camera": {
-        "name": "Camera"
       }
     }
   },
