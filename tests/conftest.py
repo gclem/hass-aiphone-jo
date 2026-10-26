@@ -419,7 +419,7 @@ class FakeCallSession:
         self.call.status = CallStatus.ENDED
         return {}
 
-    async def _withdraw(self) -> None:
+    async def withdraw(self) -> None:
         """Leave the relay only (LEAVE_USER): the call keeps ringing."""
         self.steps.append("withdraw")
         if self.client.withdraw_delay:
@@ -431,7 +431,7 @@ class FakeCallSession:
         if self.call.status is CallStatus.TALKING or self.first_answer:
             await self.close()
         else:
-            await self._withdraw()
+            await self.withdraw()
 
     async def reject(self) -> None:
         self._step("reject")

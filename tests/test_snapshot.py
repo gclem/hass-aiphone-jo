@@ -304,3 +304,26 @@ async def test_new_ring_replaces_capture(
     assert client.call_sessions[0].steps == PREVIEW
     await hass.async_block_till_done()
     assert len(ring_events) == 2
+
+
+async def test_leave_with_older_library(
+    hass: HomeAssistant,
+    go2rtc: FakeGo2Rtc,
+    config_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    ring_events: list[Event],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sessions without the public withdraw() are left the same way."""
+    from .conftest import FakeCallSession
+
+    monkeypatch.setattr(
+        FakeCallSession, "_withdraw", FakeCallSession.withdraw, raising=False
+    )
+    monkeypatch.delattr(FakeCallSession, "withdraw")
+    await _setup(hass, config_entry, **{CONF_RING_SNAPSHOT: True})
+    client = _client(client_holder)
+    await _ring(hass, client)
+    await until(lambda: ring_events)
+    assert client.call_sessions[0].steps == PREVIEW
+    assert not client.call_session_open

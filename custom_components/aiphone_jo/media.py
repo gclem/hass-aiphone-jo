@@ -430,6 +430,7 @@ class CameraMedia:
     @staticmethod
     async def _async_leave_ring(session: Any, bridge: Go2RtcBridge) -> None:
         # Never reject nor hang up: that would end the call for every phone.
+        # withdraw() is public since library 0.4.1.
         leave = getattr(session, "withdraw", None) or session._withdraw
         try:
             await leave()
