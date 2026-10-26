@@ -63,6 +63,7 @@ jobs:
   go2rtc:
     name: go2rtc bridge
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -72,10 +73,12 @@ jobs:
           python-version: "3.13"
       - name: Install test requirements, a WebRTC peer and ffmpeg
         run: |
-          pip install -r requirements_test.txt aiortc
+          pip install -r requirements_test.txt aiortc imageio-ffmpeg
           jq -r '.requirements[]' custom_components/aiphone_jo/manifest.json \
             | xargs -r pip install
-          command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+          ffmpeg_bin="$(python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')"
+          sudo ln -sf "$ffmpeg_bin" /usr/local/bin/ffmpeg
+          ffmpeg -hide_banner -version | head -1
       - name: Start go2rtc
         env:
           GO2RTC_VERSION: v1.9.15
