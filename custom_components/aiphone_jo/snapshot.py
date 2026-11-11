@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import logging
 from collections.abc import Callable
@@ -13,10 +15,12 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import ATTR_RAW_NAME, CONF_RING_SNAPSHOT, DOMAIN, EVENT_RING_BUS
 from .go2rtc import Go2RtcError
+from .health import PROBLEM_RING_SNAPSHOT_FAILED, describe
 from .vendor.aiphone_jo import AiphoneJoError, CallStatus, IncomingCall
 
 if TYPE_CHECKING:
@@ -26,6 +30,24 @@ _LOGGER = logging.getLogger(__name__)
 
 SNAPSHOT_TIMEOUT = 12.0
 IMAGE_KEY = "last_visitor"
+# The last image is kept across restarts in .storage (private file).
+STORAGE_VERSION = 1
+SAVE_DELAY = 1.0
+
+
+def _store(hass: HomeAssistant, entry_id: str) -> Store[dict[str, Any]]:
+    return Store(
+        hass, STORAGE_VERSION, f"{DOMAIN}.{entry_id}.{IMAGE_KEY}", private=True
+    )
+
+
+async def async_remove_store(hass: HomeAssistant, entry_id: str) -> None:
+    """Delete the stored image (integration removed)."""
+    await _store(hass, entry_id).async_remove()
+
+
+def _datetime(value: Any) -> datetime | None:
+    return dt_util.parse_datetime(value) if isinstance(value, str) else None
 
 
 @dataclass(slots=True)
@@ -52,6 +74,9 @@ class RingSnapshots:
         self.image_at: datetime | None = None
         self.station: str | None = None
         self.ringing_at: datetime | None = None
+        self._raw_station: str | None = None
+        self._store = _store(hass, runtime.entry.entry_id)
+        self._unsaved = False
         self._ring: _Ring | None = None
         self._task: asyncio.Task[None] | None = None
         self._logged_error: str | None = None
@@ -60,6 +85,46 @@ class RingSnapshots:
     def enabled(self) -> bool:
         """True when the snapshot on ring is enabled in the options."""
         return bool(self._runtime.entry.options.get(CONF_RING_SNAPSHOT, False))
+
+    # ---------------------------------------------------------- storage
+
+    async def async_load(self) -> None:
+        """Restore the last image, kept across restarts."""
+        try:
+            data = await self._store.async_load()
+        except (OSError, ValueError) as err:
+            _LOGGER.debug("Last visitor image not restored: %s", type(err).__name__)
+            return
+        if not isinstance(data, dict) or not isinstance(data.get("image"), str):
+            return
+        try:
+            image = base64.b64decode(data["image"], validate=True)
+        except (binascii.Error, ValueError):
+            _LOGGER.debug("Stored last visitor image unreadable, ignored")
+            return
+        raw = data.get("station")
+        self.image = image
+        self.image_at = _datetime(data.get("image_at"))
+        self.ringing_at = _datetime(data.get("ringing_at"))
+        self._raw_station = raw if isinstance(raw, str) else None
+        self.station = (
+            self._runtime.station_label(self._raw_station)
+            if self._raw_station
+            else None
+        )
+
+    def _saved_data(self) -> dict[str, Any]:
+        self._unsaved = False
+        return self._data()
+
+    def _data(self) -> dict[str, Any]:
+        image = self.image
+        return {
+            "image": base64.b64encode(image).decode() if image is not None else None,
+            "image_at": self.image_at.isoformat() if self.image_at else None,
+            "station": self._raw_station,
+            "ringing_at": self.ringing_at.isoformat() if self.ringing_at else None,
+        }
 
     # ------------------------------------------------------------ rings
 
@@ -99,6 +164,11 @@ class RingSnapshots:
             return
         except (AiphoneJoError, Go2RtcError, TimeoutError) as err:
             self._log_error(err)
+            station = self._runtime.station_label(ring.station)
+            self._runtime.health.report(
+                PROBLEM_RING_SNAPSHOT_FAILED,
+                f"No image of the visitor at {station}: {describe(err)}",
+            )
         self._finish(ring, image)
 
     def _log_error(self, err: Exception) -> None:
@@ -117,8 +187,12 @@ class RingSnapshots:
             self._logged_error = None
             self.image = image
             self.image_at = dt_util.now()
+            self._raw_station = ring.station
             self.station = self._runtime.station_label(ring.station)
             self.ringing_at = ring.at
+            # Written to disk shortly after, and on shutdown at the latest.
+            self._unsaved = True
+            self._store.async_delay_save(self._saved_data, SAVE_DELAY)
             self._notify()
         self._fire(ring, image)
 
@@ -159,6 +233,9 @@ class RingSnapshots:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await asyncio.wait({task})
+        if self._unsaved:
+            # Reload or removal before the delayed write: write it now.
+            await self._store.async_save(self._saved_data())
 
     # ------------------------------------------------------------ event
 

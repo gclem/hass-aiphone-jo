@@ -135,12 +135,9 @@ async def test_ring_then_answer_and_hang_up(
     """Answering runs the sequence and shows the visitor in the camera."""
     client = _client(client_holder)
     assert hass.states.get(CALL).state == "idle"
-    assert hass.states.get(ANSWER).state == STATE_UNAVAILABLE
 
     await _ring(hass, client)
     assert hass.states.get(CALL).state == "ringing"
-    assert hass.states.get(ANSWER).state != STATE_UNAVAILABLE
-    assert hass.states.get(HANG_UP).state == STATE_UNAVAILABLE
 
     await _press(hass, ANSWER)
     session = _session(client)
@@ -217,7 +214,9 @@ async def test_unanswered_call(
     client.emit(CallUpdatedEvent(call))
     await hass.async_block_till_done()
     assert hass.states.get(CALL).state == expected
-    assert hass.states.get(ANSWER).state == STATE_UNAVAILABLE
+    with pytest.raises(HomeAssistantError) as err:
+        await _press(hass, ANSWER)
+    assert err.value.translation_key == "call_not_ringing"
 
 
 async def test_reject(

@@ -2,6 +2,25 @@
 
 All notable changes to this integration.
 
+## Unreleased
+
+- Problems are reported in Home Assistant, not only in the logs: a **Cloud
+  connection** diagnostic sensor (with the last error, the time of the last
+  connection or disconnection and the number of reconnections), repairs when
+  the Aiphone cloud stays unreachable for 5 minutes or refuses the ring topic,
+  and a **Problem** event entity with the matching `aiphone_jo_error` event
+  (lost connection, failed command, image, camera or call). The diagnostics
+  keep the recent history and the signaling of the last call.
+- A refused ring topic is now reported at startup too; it was only logged
+  after a reconnection.
+- While a station rings, still images and the live view no longer open a
+  monitoring session on it, which may end the call (calls seen as missed
+  after a few seconds); the output buttons use another station first.
+- The Answer, Hang up and Reject buttons stay available while connected,
+  instead of only during the few seconds of a ring; pressing one without a
+  call says why.
+- The Last visitor image, its station and time are kept across restarts.
+
 ## 0.4.2
 
 - Update the aiphone-jo library to 0.4.2.

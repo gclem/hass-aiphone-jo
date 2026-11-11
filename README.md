@@ -48,7 +48,9 @@ All entities belong to one device, the monitor.
 | `button` | Action 1 | Pulses output 1 of the monitor (unlock output). |
 | `button` | Action 2 | Pulses output 2 of the monitor (option output). |
 | `camera` | Camera | Image and live view of the entrance station chosen in the options. |
-| `image` | Last visitor | Image captured at the last ring, with `station` and `ringing_at` (only with the snapshot on ring option). |
+| `image` | Last visitor | Image captured at the last ring, with `station` and `ringing_at`, kept across restarts (only with the snapshot on ring option). |
+| `binary_sensor` | Cloud connection | Diagnostic: connection to the Aiphone cloud, with `connected_since`, `disconnected_since`, `last_error`, `reconnections` and `ring_topic_subscribed`. Always available. |
+| `event` | Problem | Diagnostic: fired on every problem, with its `message` (see [Problems and errors](#problems-and-errors)). Always available. |
 
 What each output does depends on your installation: a door strike, a gate
 motor, lighting or any other equipment wired to it. Rename the buttons in Home
@@ -59,7 +61,9 @@ does not report any state for its outputs. The monitor only accepts output
 commands during a short monitoring session: the integration opens one on an
 entrance station, sends the command and closes it immediately. One session
 runs at a time, so successive presses are queued. If the station is busy (call
-or monitoring in progress), the other camera stations are tried.
+or monitoring in progress), the other camera stations are tried. While a
+station rings, the buttons use another station first: monitoring the station
+that calls may end the call.
 
 ### Camera
 
@@ -103,6 +107,11 @@ start.
 
 If go2rtc cannot be reached, the camera is unavailable and a repair notice
 explains what to do; the other entities keep working.
+
+While a station rings, the camera never opens a monitoring session on it,
+since that may end the call: images come from another camera station, or the
+last image is kept, and a live view on that station is refused with an
+explanation. Answer the call to see the visitor.
 
 ### Snapshot on ring (experimental)
 
@@ -148,6 +157,10 @@ Disabled by default. When enabled in the options, the integration adds:
 | `button` | Answer | Answers the ringing call. |
 | `button` | Hang up | Ends the call answered from Home Assistant. |
 | `button` | Reject | Declines the ringing call. |
+
+The buttons stay available while the cloud is connected; pressing one when
+no call rings (or, for Hang up, when no call was answered from Home
+Assistant) shows an error that says so.
 | `sensor` | Call | `idle`, `ringing`, `connecting`, `talking`, `ended`, `rejected`, `missed`, `answered_elsewhere` or `failed`, with the `station`, `started_at` and `end_reason` (`answered_elsewhere`, `ended_by_station`, `cancelled_by_station`, `expired`, `rejected` or `ended_by_client`). |
 
 After **Answer**, open the camera: the live view shows the visitor with sound.
@@ -180,6 +193,43 @@ your installation.
 
 Entities become unavailable while the cloud connection is down; the
 integration reconnects automatically.
+
+### Problems and errors
+
+Problems are not only logged, they are reported in Home Assistant:
+
+- the **Cloud connection** sensor tells whether the integration is connected,
+  since when, the last error and how many times it reconnected;
+- a **repair** appears when the Aiphone cloud stays unreachable for 5 minutes,
+  and when the cloud refuses the ring topic (rings would be missed). Each one
+  explains what to do and disappears once the problem is gone;
+- the **Problem** entity and the `aiphone_jo_error` event are fired on every
+  problem, with `type`, `message`, `at`, `entry_id` and `device_id`. Types:
+  `connection_lost`, `cloud_unreachable`, `auth_refused`, `ring_topic_refused`,
+  `ring_snapshot_failed`, `camera_failed`, `call_failed` and
+  `command_failed`;
+- the diagnostics keep the recent connections, problems and the signaling of
+  the last call: attach them to an issue.
+
+Messages never contain the identifiers of the terminal. Example of a
+notification for lasting problems only:
+
+```yaml
+automation:
+  - alias: Intercom problem
+    triggers:
+      - trigger: event
+        event_type: aiphone_jo_error
+    conditions:
+      - condition: template
+        value_template: >
+          {{ trigger.event.data.type not in ["connection_lost", "camera_failed"] }}
+    actions:
+      - action: notify.mobile_app_my_phone
+        data:
+          title: "Intercom problem"
+          message: "{{ trigger.event.data.message }}"
+```
 
 ## Installation
 

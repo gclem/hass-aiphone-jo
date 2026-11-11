@@ -15,6 +15,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from .api import Station
 from .call import CallController
 from .const import CONF_STATION, DOMAIN
+from .health import PROBLEM_COMMAND_FAILED, Health, describe
 from .media import CameraMedia
 from .names import StationNamer
 from .snapshot import RingSnapshots
@@ -35,6 +36,8 @@ from .vendor.aiphone_jo import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+OUTPUT_NAMES = {Output.UNLOCK: "Action 1", Output.OPTION: "Action 2"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,8 +81,16 @@ class AiphoneJoRuntime:
         self._call: IncomingCall | None = None
         # One monitoring session at a time: outputs, images and live video.
         self.session_lock = asyncio.Lock()
-        self.media = CameraMedia(hass, self)
         update = signal_update(entry.entry_id)
+        self.health = Health(
+            hass,
+            entry,
+            client.credentials,
+            lambda: async_dispatcher_send(hass, update),
+            connected=client.connected,
+            ring_topic_subscribed=client.broadcast_subscribed,
+        )
+        self.media = CameraMedia(hass, self)
         self.calls = CallController(
             hass, self, lambda: async_dispatcher_send(hass, update)
         )
@@ -96,6 +107,7 @@ class AiphoneJoRuntime:
     async def async_stop(self) -> None:
         """Stop listening and disconnect."""
         self._remove_listener()
+        self.health.async_shutdown()
         await self.snapshots.async_shutdown()
         await self.calls.async_shutdown()
         await self.media.async_shutdown()
@@ -112,6 +124,7 @@ class AiphoneJoRuntime:
     def _handle_event(self, event: AiphoneEvent) -> None:
         entry_id = self.entry.entry_id
         if isinstance(event, ConnectionStateEvent):
+            self.health.async_connection_changed(event)
             if event.auth_failed:
                 _LOGGER.warning(
                     "The cloud refused this terminal: pair the monitor again"
@@ -136,13 +149,44 @@ class AiphoneJoRuntime:
                 async_dispatcher_send(self.hass, signal_update(entry_id))
         self.calls.async_handle_event(event)
 
-    def session_stations(self) -> list[Station]:
-        """Camera stations, the one chosen in the options first."""
+    @property
+    def ringing_station_id(self) -> int | None:
+        """Id of the entrance station calling right now, if any."""
+        call = self._call
+        if not self.ringing or call is None or call.status is not CallStatus.RINGING:
+            return None
+        return call.term_id
+
+    def session_stations(self, *, media: bool = False) -> list[Station]:
+        """Camera stations for a monitoring session, the one chosen first.
+
+        Monitoring a station while it calls may end the call on every phone:
+        images and live views never monitor it (``media``), and the output
+        buttons only use it as a last resort.
+        """
         preferred = self.entry.options.get(CONF_STATION)
-        return sorted(self.stations, key=lambda station: station.id != preferred)
+        ringing = self.ringing_station_id
+        stations = sorted(
+            self.stations,
+            key=lambda station: (station.id == ringing, station.id != preferred),
+        )
+        if media and ringing is not None:
+            return [station for station in stations if station.id != ringing]
+        return stations
 
     async def async_pulse(self, output: Output) -> None:
         """Pulse a monitor output; one monitoring session at a time."""
+        try:
+            await self._async_pulse(output)
+        except HomeAssistantError as err:
+            cause = err.__cause__
+            detail = describe(cause) if cause is not None else err.translation_key
+            self.health.report(
+                PROBLEM_COMMAND_FAILED, f"{OUTPUT_NAMES[output]}: {detail}"
+            )
+            raise
+
+    async def _async_pulse(self, output: Output) -> None:
         stations = self.session_stations()
         if not stations:
             raise HomeAssistantError(
