@@ -2,6 +2,10 @@
 
 All notable changes to this integration.
 
+## 0.4.2
+
+- Update the aiphone-jo library to 0.4.2.
+
 ## 0.4.1
 
 - Experimental snapshot on ring, disabled by default: each ring captures an

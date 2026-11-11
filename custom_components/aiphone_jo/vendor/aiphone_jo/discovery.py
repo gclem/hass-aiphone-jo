@@ -96,6 +96,11 @@ class _Receiver(asyncio.DatagramProtocol):
         self.refused: dict[str, DiscoveredMonitor] = {}
         self._strict_peer = strict_peer
         self._done = done
+        self.closed = asyncio.Event()
+
+    def connection_lost(self, exc: Exception | None) -> None:
+        # The loop closes the socket just before this call: the port is free.
+        self.closed.set()
 
     def datagram_received(self, data: bytes, addr: tuple[str | Any, int]) -> None:
         peer = str(addr[0])
@@ -204,6 +209,9 @@ async def discover(
     finally:
         sender.close()
         transport.close()
+        # The loop closes the socket on its next iteration: wait for it, so that
+        # an immediate new discovery can listen on the same port again.
+        await receiver.closed.wait()
     accepted = list(receiver.devices.values())
     accepted_addresses = {monitor.address for monitor in accepted}
     refused = [m for a, m in receiver.refused.items() if a not in accepted_addresses]
