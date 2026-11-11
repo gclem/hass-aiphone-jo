@@ -72,4 +72,10 @@ async def test_diagnostics_of_paired_monitor(
         "call_talk": False,
         "ring_snapshot": False,
         "call_state": "idle",
+        "call_end_reason": None,
     }
+    health = diagnostics["health"]
+    assert health["connected"] is True
+    assert health["reconnections"] == 0
+    assert health["problems"] == []
+    assert diagnostics["last_call"] is None

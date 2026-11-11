@@ -145,6 +145,26 @@
     "binary_sensor": {
       "ringing": {
         "name": "Sonnerie en cours"
+      },
+      "cloud_connection": {
+        "name": "Connexion cloud",
+        "state_attributes": {
+          "connected_since": {
+            "name": "Connecté depuis"
+          },
+          "disconnected_since": {
+            "name": "Déconnecté depuis"
+          },
+          "last_error": {
+            "name": "Dernière erreur"
+          },
+          "reconnections": {
+            "name": "Reconnexions"
+          },
+          "ring_topic_subscribed": {
+            "name": "Abonné au topic de sonnerie"
+          }
+        }
       }
     },
     "button": {
@@ -183,6 +203,26 @@
           },
           "raw_name": {
             "name": "Nom d'origine"
+          }
+        }
+      },
+      "problem": {
+        "name": "Problème",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "connection_lost": "Connexion cloud perdue",
+              "cloud_unreachable": "Cloud injoignable",
+              "auth_refused": "Terminal refusé par le cloud",
+              "ring_topic_refused": "Topic de sonnerie refusé",
+              "ring_snapshot_failed": "Échec de l'image du visiteur",
+              "camera_failed": "Échec de la caméra",
+              "call_failed": "Échec de l'appel",
+              "command_failed": "Échec de la commande"
+            }
+          },
+          "message": {
+            "name": "Message"
           }
         }
       }
@@ -291,10 +331,10 @@
       "message": "Le décroché des appels est désactivé : activez-le dans les options de l'intégration."
     },
     "call_not_ringing": {
-      "message": "Aucun appel en cours de sonnerie."
+      "message": "Aucun appel ne sonne. Décrocher et Refuser fonctionnent pendant qu'une platine de rue sonne."
     },
     "call_not_active": {
-      "message": "Aucun appel en cours."
+      "message": "Aucun appel en cours. Raccrocher fonctionne après avoir décroché un appel depuis Home Assistant."
     },
     "call_video_unavailable": {
       "message": "Impossible de décrocher : la caméra est indisponible (voir la notification de réparation)."
@@ -317,6 +357,14 @@
     "video_unsupported": {
       "title": "Caméra Aiphone JO indisponible dans cette version",
       "description": "Cette version de l'intégration ne peut pas encore afficher la caméra. Mettez l'intégration à jour dès qu'une nouvelle version est disponible. Les autres entités continuent de fonctionner."
+    },
+    "cloud_unreachable": {
+      "title": "{name} ne parvient pas à joindre le cloud Aiphone",
+      "description": "Home Assistant n'arrive plus à joindre le cloud Aiphone depuis {minutes} minutes. Les sonneries, les boutons et la caméra ne fonctionnent pas tant que la connexion n'est pas rétablie ; l'intégration réessaie en continu et cet avis disparaît dès qu'elle est reconnectée.\n\nDernière erreur : `{error}`\n\nVérifiez la connexion internet de Home Assistant (le port TCP sortant 8883 ne doit pas être bloqué) et l'état de l'application Aiphone officielle. Si le problème persiste, ouvrez une issue avec les diagnostics de l'intégration."
+    },
+    "ring_topic_refused": {
+      "title": "{name} risque de manquer des sonneries",
+      "description": "Le cloud Aiphone a refusé l'abonnement au topic de sonnerie du moniteur : les sonneries risquent de ne pas arriver jusqu'à Home Assistant, alors que les boutons et la caméra continuent de fonctionner.\n\nRechargez l'intégration. Si cet avis revient, appairez à nouveau le moniteur (**Reconfigurer**), puis ouvrez une issue avec les diagnostics de l'intégration si le problème persiste."
     }
   }
 }

@@ -37,6 +37,7 @@ from .go2rtc import (
     Go2RtcViewer,
     async_get_server,
 )
+from .health import PROBLEM_CAMERA_FAILED
 from .talk import SendOffer, TalkPath, TalkServer
 from .vendor.aiphone_jo import AiphoneJoError, StationBusyError
 
@@ -77,6 +78,17 @@ class NoStationError(AiphoneJoError):
 
 class MediaBusyError(AiphoneJoError):
     """A live view uses the monitoring session."""
+
+
+class StationRingingError(AiphoneJoError):
+    """The only camera station is calling: monitoring it may end the call."""
+
+
+STATION_RINGING = (
+    "An entrance station is ringing: opening the live view now could end the "
+    "call. Answer the call to see the visitor, or open the camera again when "
+    "the ringing stops."
+)
 
 
 class CameraMedia:
@@ -158,8 +170,17 @@ class CameraMedia:
         if key != self._logged_error:
             _LOGGER.warning("Camera image or live view failed: %s (%s)", key, err)
             self._logged_error = key
+            # Reported once per kind of error, like the log, not on every image.
+            self._runtime.health.report(PROBLEM_CAMERA_FAILED, err)
         else:
             _LOGGER.debug("Camera image or live view failed: %s", key)
+
+    def _ringing_only(self) -> bool:
+        """True when every camera station is calling: keep the last image."""
+        runtime = self._runtime
+        return runtime.ringing_station_id is not None and not runtime.session_stations(
+            media=True
+        )
 
     def _fresh(self) -> bool:
         return (
@@ -178,8 +199,10 @@ class CameraMedia:
     # -------------------------------------------------------- live session
 
     async def _with_station(self, action: Callable[[Station], Awaitable[_T]]) -> _T:
-        stations = self._runtime.session_stations()
+        stations = self._runtime.session_stations(media=True)
         if not stations:
+            if self._runtime.ringing_station_id is not None:
+                raise StationRingingError("The entrance station is ringing")
             raise NoStationError("No entrance station with a camera")
         busy: StationBusyError | None = None
         for station in stations:
@@ -446,10 +469,10 @@ class CameraMedia:
         bridge = self._bridge
         if not self.available or bridge is None:
             return self._image
-        if not self.live and self._fresh():
+        if not self.live and (self._fresh() or self._ringing_only()):
             return self._image
         async with self._image_lock:
-            if not self.live and self._fresh():
+            if not self.live and (self._fresh() or self._ringing_only()):
                 return self._image
             try:
                 if self.live:
@@ -478,6 +501,9 @@ class CameraMedia:
             return
         try:
             await self.async_acquire()
+        except StationRingingError:
+            send_message(WebRTCError("station_ringing", STATION_RINGING))
+            return
         except (AiphoneJoError, Go2RtcError) as err:
             self._log_error(err)
             reason = type(err).__name__

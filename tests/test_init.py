@@ -592,7 +592,7 @@ async def test_migration_to_monitor_id(
     assert migrated.unique_id == f"{monitor_id}_ring"
     assert devices.async_get(device.id).identifiers == {(DOMAIN, monitor_id)}
     assert hass.states.get(ring.entity_id) is not None
-    assert len(er.async_entries_for_config_entry(entities, entry.entry_id)) == 6
+    assert len(er.async_entries_for_config_entry(entities, entry.entry_id)) == 8
 
 
 async def test_migration_with_unreadable_credentials(

@@ -22,9 +22,11 @@ from .api import (
 )
 from .const import CONF_CREDENTIALS, CONF_STATIONS, DOMAIN, RING_TIMEOUT
 from .coordinator import AiphoneJoRuntime
+from .health import async_delete_issues
 from .media import ISSUES
 from .names import async_get_station_namer
 from .notify import async_notify_manual_removal
+from .snapshot import async_remove_store
 from .vendor.aiphone_jo import (
     AiphoneJoClient,
     AiphoneJoError,
@@ -90,7 +92,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: AiphoneJoConfigEntry) ->
             )
 
     namer = await async_get_station_namer(hass)
-    entry.runtime_data = AiphoneJoRuntime(hass, entry, client, stations, namer)
+    runtime = AiphoneJoRuntime(hass, entry, client, stations, namer)
+    entry.runtime_data = runtime
+    runtime.health.async_start()
+    await runtime.snapshots.async_load()
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
@@ -115,6 +120,8 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Unregister the terminal when the integration is removed."""
     for issue in ISSUES:
         ir.async_delete_issue(hass, DOMAIN, issue)
+    async_delete_issues(hass, entry.entry_id)
+    await async_remove_store(hass, entry.entry_id)
     removed = False
     try:
         credentials = credentials_from_storage(

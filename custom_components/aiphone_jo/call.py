@@ -16,6 +16,7 @@ from homeassistant.helpers.event import async_call_later
 
 from .const import CONF_CALL_ANSWERING, DOMAIN
 from .go2rtc import Go2RtcError
+from .health import PROBLEM_CALL_FAILED, describe
 from .vendor.aiphone_jo import (
     AiphoneEvent,
     AiphoneJoError,
@@ -215,6 +216,9 @@ class CallController:
                 raise _error("call_ended") from err
             except (AiphoneJoError, Go2RtcError) as err:
                 _LOGGER.warning("Answering failed: %s", type(err).__name__)
+                self._runtime.health.report(
+                    PROBLEM_CALL_FAILED, f"Answering failed: {describe(err)}"
+                )
                 # The library withdrew without ending the call: it can be retried.
                 ringing = call.status is CallStatus.RINGING
                 await self._async_finish(
@@ -271,6 +275,9 @@ class CallController:
                     else "call_ended"
                 ) from err
             except AiphoneJoError as err:
+                self._runtime.health.report(
+                    PROBLEM_CALL_FAILED, f"Rejecting failed: {describe(err)}"
+                )
                 raise _error("call_failed", code=type(err).__name__) from err
         self.end_reason = str(CallEndReason.REJECTED)
         self._set(CallState.REJECTED)

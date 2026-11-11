@@ -145,6 +145,26 @@
     "binary_sensor": {
       "ringing": {
         "name": "Ringing"
+      },
+      "cloud_connection": {
+        "name": "Cloud connection",
+        "state_attributes": {
+          "connected_since": {
+            "name": "Connected since"
+          },
+          "disconnected_since": {
+            "name": "Disconnected since"
+          },
+          "last_error": {
+            "name": "Last error"
+          },
+          "reconnections": {
+            "name": "Reconnections"
+          },
+          "ring_topic_subscribed": {
+            "name": "Ring topic subscribed"
+          }
+        }
       }
     },
     "button": {
@@ -183,6 +203,26 @@
           },
           "raw_name": {
             "name": "Original name"
+          }
+        }
+      },
+      "problem": {
+        "name": "Problem",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "connection_lost": "Cloud connection lost",
+              "cloud_unreachable": "Cloud unreachable",
+              "auth_refused": "Terminal refused by the cloud",
+              "ring_topic_refused": "Ring topic refused",
+              "ring_snapshot_failed": "Visitor image failed",
+              "camera_failed": "Camera failed",
+              "call_failed": "Call failed",
+              "command_failed": "Command failed"
+            }
+          },
+          "message": {
+            "name": "Message"
           }
         }
       }
@@ -291,10 +331,10 @@
       "message": "Call answering is disabled: enable it in the integration options."
     },
     "call_not_ringing": {
-      "message": "No call is ringing."
+      "message": "No call is ringing. Answer and Reject work while an entrance station rings."
     },
     "call_not_active": {
-      "message": "No call is in progress."
+      "message": "No call is in progress. Hang up works after answering a call from Home Assistant."
     },
     "call_video_unavailable": {
       "message": "The call cannot be answered because the camera is unavailable (see the repair notice)."
@@ -317,6 +357,14 @@
     "video_unsupported": {
       "title": "Aiphone JO camera not available in this version",
       "description": "This version of the integration cannot show the camera yet. Update the integration when a new version is available. The other entities keep working."
+    },
+    "cloud_unreachable": {
+      "title": "{name} cannot reach the Aiphone cloud",
+      "description": "Home Assistant has not been able to reach the Aiphone cloud for {minutes} minutes. Rings, buttons and the camera do not work until the connection is back; the integration keeps retrying and this notice disappears once it is connected again.\n\nLast error: `{error}`\n\nCheck the internet connection of Home Assistant (outgoing TCP port 8883 must not be blocked) and the status of the official Aiphone app. If the problem lasts, open an issue with the integration diagnostics."
+    },
+    "ring_topic_refused": {
+      "title": "{name} may miss rings",
+      "description": "The Aiphone cloud refused the subscription to the ring topic of the monitor: rings may not reach Home Assistant, while the buttons and the camera keep working.\n\nReload the integration. If this notice comes back, pair the monitor again (**Reconfigure**), then open an issue with the integration diagnostics if it persists."
     }
   }
 }

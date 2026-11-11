@@ -7,7 +7,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import AiphoneJoConfigEntry
-from .call import ACTIVE_STATES, CallState
 from .coordinator import AiphoneJoRuntime
 from .entity import AiphoneJoEntity, async_remove_disabled
 from .vendor.aiphone_jo import Output
@@ -56,22 +55,18 @@ class AiphoneJoOutputButton(AiphoneJoEntity, ButtonEntity):
 
 
 class AiphoneJoCallButton(AiphoneJoEntity, ButtonEntity):
-    """Answer, hang up or reject a call (experimental)."""
+    """Answer, hang up or reject a call (experimental).
+
+    Available while the cloud is connected, like the other buttons: a call
+    rings for a few seconds only, and a button that is unavailable the rest of
+    the time looks broken. Pressing it when no call is ringing (or answered)
+    raises an error that says so.
+    """
 
     def __init__(self, runtime: AiphoneJoRuntime, key: str) -> None:
         """Initialize."""
         super().__init__(runtime, key)
         self._key = key
-
-    @property
-    def available(self) -> bool:
-        """Available only when the action makes sense."""
-        if not super().available:
-            return False
-        state = self.runtime.calls.state
-        if self._key == "call_hang_up":
-            return state in ACTIVE_STATES
-        return state is CallState.RINGING
 
     async def async_press(self) -> None:
         """Run the action."""

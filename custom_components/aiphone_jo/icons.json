@@ -6,6 +6,12 @@
         "state": {
           "on": "mdi:bell-ring"
         }
+      },
+      "cloud_connection": {
+        "default": "mdi:cloud-check-outline",
+        "state": {
+          "off": "mdi:cloud-off-outline"
+        }
       }
     },
     "button": {
@@ -48,6 +54,11 @@
           "rejected": "mdi:phone-cancel",
           "failed": "mdi:phone-alert"
         }
+      }
+    },
+    "event": {
+      "problem": {
+        "default": "mdi:alert-circle-outline"
       }
     }
   }
