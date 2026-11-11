@@ -127,7 +127,8 @@ class AiomqttConnection:
                 yield str(message.topic), bytes(payload)
         except aiomqtt.MqttError as err:
             if not self._closed:
-                raise CloudConnectionError(f"MQTT connection lost: {err}") from err
+                # The client adds the "MQTT connection lost" context itself.
+                raise CloudConnectionError(str(err) or type(err).__name__) from err
 
     async def close(self) -> None:
         if self._closed:

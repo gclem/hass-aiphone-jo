@@ -2,7 +2,7 @@
 
 All notable changes to this integration.
 
-## Unreleased
+## 0.4.3
 
 - Problems are reported in Home Assistant, not only in the logs: a **Cloud
   connection** diagnostic sensor (with the last error, the time of the last
@@ -20,6 +20,7 @@ All notable changes to this integration.
   instead of only during the few seconds of a ring; pressing one without a
   call says why.
 - The Last visitor image, its station and time are kept across restarts.
+- Update the aiphone-jo library to 0.4.3.
 
 ## 0.4.2
 
