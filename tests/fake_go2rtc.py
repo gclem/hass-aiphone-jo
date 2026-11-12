@@ -124,6 +124,8 @@ class FakeGo2Rtc:
     viewers_total: int = 0
     ingest_status: int = 201
     frame: bytes = JPEG
+    # Responses returned before the real image, as (status, body).
+    frame_failures: list[tuple[int, bytes]] = field(default_factory=list)
     video: bool = True
     rtsp: bool = True
     pushed: set[str] = field(default_factory=set)
@@ -253,6 +255,9 @@ class FakeGo2Rtc:
     async def _frame(self, request: web.Request) -> web.Response:
         name = request.query["src"]
         self.frames.append(name)
+        if self.frame_failures:
+            status, failure = self.frame_failures.pop(0)
+            return web.Response(status=status, body=failure)
         body = self.frame if self._live(name) else b""
         return web.Response(status=200, body=body, content_type="image/jpeg")
 

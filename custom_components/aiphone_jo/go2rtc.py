@@ -52,10 +52,23 @@ RELAY_TIMEOUT = 2
 
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15)
 FRAME_TIMEOUT = aiohttp.ClientTimeout(total=20)
+# go2rtc cannot make an image until a key frame arrives, which may come a
+# little after the first video packets: a failed image is requested again.
+FRAME_ATTEMPTS = 3
+FRAME_RETRY_DELAY = 0.5
+# Characters of go2rtc's error response kept in the error message.
+ERROR_DETAIL = 120
 
 
 class Go2RtcError(Exception):
     """go2rtc request failed."""
+
+
+def _frame_error(status: int, body: bytes) -> str:
+    if status == 200:
+        return "No image: empty response"
+    detail = " ".join(body.decode(errors="replace").split())[:ERROR_DETAIL]
+    return f"No image: HTTP {status} {detail}".rstrip()
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,14 +262,17 @@ class Go2RtcBridge:
 
     async def async_frame(self, stream: str | None = None) -> bytes:
         """Current JPEG image of the stream (the target stream by default)."""
-        status, body = await self._request(
-            "GET",
-            self._url("api/frame.jpeg", src=stream or self.stream),
-            limit=FRAME_TIMEOUT,
-        )
-        if status != 200 or not body:
-            raise Go2RtcError(f"No image: HTTP {status}")
-        return body
+        url = self._url("api/frame.jpeg", src=stream or self.stream)
+        error = ""
+        for attempt in range(FRAME_ATTEMPTS):
+            if attempt:
+                await asyncio.sleep(FRAME_RETRY_DELAY)
+            status, body = await self._request("GET", url, limit=FRAME_TIMEOUT)
+            if status == 200 and body:
+                return body
+            error = _frame_error(status, body)
+            _LOGGER.debug("Image attempt %s failed: %s", attempt + 1, error)
+        raise Go2RtcError(f"{error} (after {FRAME_ATTEMPTS} attempts)")
 
     async def async_open_viewer(
         self,

@@ -61,6 +61,12 @@ ROOM_INFO = RoomInfo(terminals=(FRONT, BACK), term_inf_num=2)
 
 
 @pytest.fixture(autouse=True)
+def fast_frame_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Failed images are requested again without the real delay."""
+    monkeypatch.setattr("custom_components.aiphone_jo.go2rtc.FRAME_RETRY_DELAY", 0)
+
+
+@pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations):
     """Allow custom integrations to be loaded."""
     return

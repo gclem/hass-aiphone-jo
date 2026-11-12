@@ -13,14 +13,13 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import ATTR_RAW_NAME, CONF_RING_SNAPSHOT, DOMAIN, EVENT_RING_BUS
 from .go2rtc import Go2RtcError
-from .health import PROBLEM_RING_SNAPSHOT_FAILED, describe
+from .health import PROBLEM_RING_SNAPSHOT_FAILED, async_entry_device, describe
 from .vendor.aiphone_jo import AiphoneJoError, CallStatus, IncomingCall
 
 if TYPE_CHECKING:
@@ -244,9 +243,7 @@ class RingSnapshots:
         image_entity = er.async_get(self._hass).async_get_entity_id(
             "image", DOMAIN, f"{entry.unique_id}_{IMAGE_KEY}"
         )
-        device = dr.async_get(self._hass).async_get_device(
-            identifiers={(DOMAIN, str(entry.unique_id))}
-        )
+        device = async_entry_device(self._hass, entry.entry_id, str(entry.unique_id))
         data: dict[str, Any] = {
             "entry_id": entry.entry_id,
             "device_id": device.id if device else None,

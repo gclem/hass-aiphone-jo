@@ -80,6 +80,10 @@ class MediaBusyError(AiphoneJoError):
     """A live view uses the monitoring session."""
 
 
+def _timeout(limit: float, step: str) -> TimeoutError:
+    return TimeoutError(f"Timed out after {limit:g} s {step}")
+
+
 class StationRingingError(AiphoneJoError):
     """The only camera station is calling: monitoring it may end the call."""
 
@@ -404,17 +408,24 @@ class CameraMedia:
         if not self.available or bridge is None:
             raise Go2RtcError("Video is unavailable")
         lock = self._runtime.session_lock
-        async with asyncio.timeout(limit):
-            # Waits for an answer in progress, whose stream is then read.
-            await lock.acquire()
+        # Named in the error when the time runs out.
+        step = "waiting for another session to end"
         session: Any = None
+        try:
+            async with asyncio.timeout(limit):
+                # Waits for an answer in progress, whose stream is then read.
+                await lock.acquire()
+        except TimeoutError as err:
+            raise _timeout(limit, step) from err
         try:
             if self._call_session is not None and self._call_stream is not None:
                 stream = self._call_stream
                 lock.release()
                 lock = None
                 async with asyncio.timeout(limit):
+                    step = "waiting for the call's video"
                     await bridge.async_wait_video(limit, stream=stream)
+                    step = "reading the image"
                     image = await bridge.async_frame(stream)
             else:
                 if self._live is not None:
@@ -422,12 +433,18 @@ class CameraMedia:
                 client: Any = self._runtime.client
                 stream = bridge.ring_stream
                 async with asyncio.timeout(limit):
+                    step = "joining the call"
                     session = await client.answer_call(call)
                     await bridge.async_create_stream(stream, PLACEHOLDER_SOURCE)
+                    step = "negotiating the call's video"
                     offer = await session.request_offer()
                     await session.send_answer(await bridge.async_ingest(offer, stream))
+                    step = "waiting for the call's video"
                     await bridge.async_wait_video(limit, stream=stream)
+                    step = "reading the image"
                     image = await bridge.async_frame(stream)
+        except TimeoutError as err:
+            raise _timeout(limit, step) from err
         finally:
             try:
                 if session is not None:
