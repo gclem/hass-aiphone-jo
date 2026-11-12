@@ -126,6 +126,10 @@ async def test_no_video(
     assert ring_events[0].data["snapshot"] is False
     assert ring_events[0].data["image_url"] is None
     assert "No image of the visitor" in caplog.text
+    problem = config_entry.runtime_data.health.problems[-1]
+    assert problem.message.endswith(
+        "TimeoutError: Timed out after 0.3 s waiting for the call's video"
+    )
     assert config_entry.runtime_data.session_lock.locked() is False
 
 

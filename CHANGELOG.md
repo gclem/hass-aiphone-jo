@@ -2,6 +2,15 @@
 
 All notable changes to this integration.
 
+## 0.4.4
+
+- Device lookups no longer use the device registry call deprecated in Home
+  Assistant 2027.8 (#31).
+- A camera image that go2rtc cannot make yet (no key frame) is requested
+  again, up to 3 times; errors keep go2rtc's reason (#32).
+- When the snapshot on ring times out, the error says which step was too
+  slow, instead of an empty `TimeoutError ()` (#33).
+
 ## 0.4.3
 
 - Problems are reported in Home Assistant, not only in the logs: a **Cloud

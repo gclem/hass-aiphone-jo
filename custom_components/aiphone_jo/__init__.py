@@ -22,7 +22,7 @@ from .api import (
 )
 from .const import CONF_CREDENTIALS, CONF_STATIONS, DOMAIN, RING_TIMEOUT
 from .coordinator import AiphoneJoRuntime
-from .health import async_delete_issues
+from .health import async_delete_issues, async_entry_device
 from .media import ISSUES
 from .names import async_get_station_namer
 from .notify import async_notify_manual_removal
@@ -181,6 +181,7 @@ async def _async_migrate_identifiers(
         return None
 
     await er.async_migrate_entries(hass, entry.entry_id, update_entity)
-    registry = dr.async_get(hass)
-    if device := registry.async_get_device(identifiers={(DOMAIN, old)}):
-        registry.async_update_device(device.id, new_identifiers={(DOMAIN, new)})
+    if device := async_entry_device(hass, entry.entry_id, old):
+        dr.async_get(hass).async_update_device(
+            device.id, new_identifiers={(DOMAIN, new)}
+        )

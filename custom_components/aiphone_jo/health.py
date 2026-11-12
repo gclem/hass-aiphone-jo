@@ -90,6 +90,22 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
+@callback
+def async_entry_device(
+    hass: HomeAssistant, entry_id: str, identifier: str
+) -> dr.DeviceEntry | None:
+    """Device of the config entry with this identifier.
+
+    Identifiers are no longer unique across config entries, so the device is
+    looked up among the entry's own devices.
+    """
+    wanted = (DOMAIN, identifier)
+    for device in dr.async_entries_for_config_entry(dr.async_get(hass), entry_id):
+        if wanted in device.identifiers:
+            return device
+    return None
+
+
 def describe(err: BaseException) -> str:
     """Short description of an error: its type and message."""
     text = str(err)
@@ -304,9 +320,7 @@ class Health:
         problem = Problem(problem_type, self.redact(text), dt_util.now())
         self.problems.append(problem)
         entry = self._entry
-        device = dr.async_get(self._hass).async_get_device(
-            identifiers={(DOMAIN, str(entry.unique_id))}
-        )
+        device = async_entry_device(self._hass, entry.entry_id, str(entry.unique_id))
         self._hass.bus.async_fire(
             EVENT_ERROR_BUS,
             {

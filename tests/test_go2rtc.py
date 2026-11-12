@@ -159,10 +159,33 @@ async def test_wait_video(bridge: Go2RtcBridge, go2rtc: FakeGo2Rtc) -> None:
 async def test_frame(bridge: Go2RtcBridge, go2rtc: FakeGo2Rtc) -> None:
     """An empty frame (no producer) is an error."""
     await bridge.async_ensure_stream()
-    with pytest.raises(Go2RtcError):
+    with pytest.raises(Go2RtcError, match="empty response"):
         await bridge.async_frame()
     await bridge.async_ingest(JANUS_OFFER)
     assert await bridge.async_frame() == JPEG
+
+
+async def test_frame_retried(bridge: Go2RtcBridge, go2rtc: FakeGo2Rtc) -> None:
+    """A failed image (no key frame yet) is requested again."""
+    await bridge.async_ensure_stream()
+    await bridge.async_ingest(JANUS_OFFER)
+    go2rtc.frame_failures = [(500, b"no keyframe"), (200, b"")]
+    assert await bridge.async_frame() == JPEG
+    assert len(go2rtc.frames) == 3
+
+
+async def test_frame_error_detail(bridge: Go2RtcBridge, go2rtc: FakeGo2Rtc) -> None:
+    """The error keeps go2rtc's reason, on one short line."""
+    await bridge.async_ensure_stream()
+    await bridge.async_ingest(JANUS_OFFER)
+    go2rtc.frame_failures = [(500, b"exec: wrong\n  output " + b"x" * 300)] * 3
+    with pytest.raises(Go2RtcError) as err:
+        await bridge.async_frame()
+    message = str(err.value)
+    assert message.startswith("No image: HTTP 500 exec: wrong output xxx")
+    assert message.endswith("(after 3 attempts)")
+    assert len(message) < 180
+    assert len(go2rtc.frames) == 3
 
 
 async def test_viewer(bridge: Go2RtcBridge, go2rtc: FakeGo2Rtc) -> None:
