@@ -71,6 +71,11 @@ async def _image(hass: HomeAssistant, entity_id: str = CAMERA) -> bytes:
     return (await async_get_image(hass, entity_id)).content
 
 
+async def _settle(hass: HomeAssistant) -> None:
+    """Let the background image refreshes finish."""
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+
 async def test_capabilities(
     hass: HomeAssistant, camera_entry: MockConfigEntry, hass_ws_client: Any
 ) -> None:
@@ -116,6 +121,7 @@ async def test_image_cached_for_refresh_interval(
     assert len(client.lives) == 1
     _age_cache(camera_entry, 2)
     await _image(hass)
+    await _settle(hass)
     assert len(client.lives) == 2
 
 
@@ -139,6 +145,7 @@ async def test_refresh_interval_and_station_options(
     assert len(client.lives) == 1
     _age_cache(config_entry, 21, 102)
     await _image(hass)
+    await _settle(hass)
     assert len(client.lives) == 2
     await _image(hass, FRONT_CAMERA)
     assert client.lives[2].terminal == 101
@@ -228,10 +235,14 @@ async def test_errors_keep_last_image(
     for _ in range(3):
         _age_cache(camera_entry, 31)
         assert await _image(hass) == JPEG
+        await _settle(hass)
     warnings = [r for r in caplog.records if "failed" in r.getMessage()]
     assert len(warnings) == 1
     go2rtc.frame = b"\xff\xd8new\xff\xd9"
     _age_cache(camera_entry, 31)
+    # The last image at once; the new one for the next request.
+    assert await _image(hass) == JPEG
+    await _settle(hass)
     assert await _image(hass) == b"\xff\xd8new\xff\xd9"
 
 
@@ -257,6 +268,7 @@ async def test_busy_station_keeps_its_camera(
     _age_cache(camera_entry, 31)
     client.live_errors[101] = StationBusyError("busy", mid="24021", rslt=486)
     assert await _image(hass) == JPEG
+    await _settle(hass)
     assert [live.terminal for live in client.lives] == [101, 101]
 
 
@@ -611,6 +623,28 @@ async def test_first_image_gives_up(
     with pytest.raises(HomeAssistantError):
         await _image(hass, BACK_CAMERA)
     assert [live.terminal for live in client.lives] == [101]
+
+
+async def test_image_survives_home_assistant_timeout(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    go2rtc: FakeGo2Rtc,
+) -> None:
+    """When Home Assistant gives up (10 s), the image is still taken and kept."""
+    client = _client(client_holder)
+    media = camera_entry.runtime_data.media
+    [front, _back] = camera_entry.runtime_data.camera_stations
+    go2rtc.video = False
+    with pytest.raises(TimeoutError):
+        async with asyncio.timeout(0.2):
+            await media.async_image(front)
+    # The video arrives after Home Assistant gave up, within VIDEO_TIMEOUT.
+    go2rtc.video = True
+    await _settle(hass)
+    assert media.cached_image(101) == JPEG
+    assert await _image(hass) == JPEG
+    assert len(client.lives) == 1
 
 
 async def test_unload_stops_live_view(
