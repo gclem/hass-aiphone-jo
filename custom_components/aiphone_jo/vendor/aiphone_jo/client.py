@@ -951,8 +951,10 @@ class AiphoneJoClient:
         session._update_correlation(reply)
         try:
             reply = await self.request(monitor, cid=cid)
-        except ResponseTimeoutError:
-            # The station may have started monitoring anyway: full teardown.
+        except (ResponseTimeoutError, asyncio.CancelledError):
+            # The station may have started monitoring anyway: full teardown,
+            # otherwise it answers 486 to the next MNT_REQ for about a minute.
+            # This includes a caller giving up (cancelled) while waiting.
             await session.close()
             raise
         result = _rslt(reply)
