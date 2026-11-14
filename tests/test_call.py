@@ -72,7 +72,7 @@ def _client(holder: ClientHolder) -> FakeClient:
     return holder.client
 
 
-def _incoming_call() -> IncomingCall:
+def _incoming_call(station: int = 101) -> IncomingCall:
     return IncomingCall(
         cid="example-call",
         station_client_id="example-station",
@@ -80,14 +80,16 @@ def _incoming_call() -> IncomingCall:
         display_name_2="",
         call_kind=1,
         term_kind=5,
-        term_id=101,
+        term_id=station,
         topic="example/topic",
         ringing_at=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
     )
 
 
-async def _ring(hass: HomeAssistant, client: FakeClient) -> IncomingCall:
-    call = _incoming_call()
+async def _ring(
+    hass: HomeAssistant, client: FakeClient, station: int = 101
+) -> IncomingCall:
+    call = _incoming_call(station)
     client.emit(RingEvent(call))
     await hass.async_block_till_done()
     return call

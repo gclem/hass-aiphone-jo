@@ -50,6 +50,30 @@ async def _setup(hass: HomeAssistant, entry: MockConfigEntry, **options: Any) ->
     await hass.async_block_till_done()
 
 
+async def test_visitor_shown_by_the_camera_of_the_station(
+    hass: HomeAssistant,
+    go2rtc: FakeGo2Rtc,
+    config_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    ring_events: list[Event],
+) -> None:
+    """The visitor's image goes to the camera of the station that rang (0.4.6)."""
+    await _setup(hass, config_entry, **{CONF_RING_SNAPSHOT: True})
+    client = _client(client_holder)
+    await _ring(hass, client, station=102)
+    await until(lambda: ring_events)
+    runtime = config_entry.runtime_data
+    media = runtime.media
+    assert hass.states.get(IMAGE).attributes["station"] == "Back"
+    assert media.cached_image(102) == JPEG
+    assert media.cached_image(101) is None
+    # The ringing station's camera shows it without opening a session.
+    [front, back] = runtime.camera_stations
+    assert front.id == 101
+    assert await media.async_image(back) == JPEG
+    assert client.lives == []
+
+
 async def test_disabled(
     hass: HomeAssistant,
     go2rtc: FakeGo2Rtc,

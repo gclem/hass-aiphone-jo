@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import AsyncIterator, Awaitable, Callable, Generator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -16,6 +18,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from homeassistant.const import CONF_ADDRESS, CONF_PORT
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.aiphone_jo.api import credentials_to_storage
@@ -64,6 +67,25 @@ ROOM_INFO = RoomInfo(terminals=(FRONT, BACK), term_inf_num=2)
 def fast_frame_retries(monkeypatch: pytest.MonkeyPatch) -> None:
     """Failed images are requested again without the real delay."""
     monkeypatch.setattr("custom_components.aiphone_jo.go2rtc.FRAME_RETRY_DELAY", 0)
+
+
+@pytest.fixture(autouse=True)
+def no_deprecated_device_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression test for #31, in every test.
+
+    ``DeviceRegistry.async_get_device`` is deprecated (identifiers are no longer
+    unique across config entries). The Home Assistant version used by the tests
+    does not report it yet, so any call from the integration fails the test.
+    """
+    original = dr.DeviceRegistry.async_get_device
+
+    def guarded(self: dr.DeviceRegistry, *args: Any, **kwargs: Any) -> Any:
+        caller = Path(sys._getframe(1).f_code.co_filename).as_posix()
+        if "/custom_components/aiphone_jo/" in caller:
+            pytest.fail(f"Deprecated DeviceRegistry.async_get_device used in {caller}")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(dr.DeviceRegistry, "async_get_device", guarded)
 
 
 @pytest.fixture(autouse=True)
