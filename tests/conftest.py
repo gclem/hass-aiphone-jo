@@ -338,6 +338,7 @@ class FakeLive:
         self.answers: list[str] = []
         self.error: BaseException | None = None
         self.exited = asyncio.Event()
+        self.cancelled = False
 
     @property
     def running(self) -> bool:
@@ -347,7 +348,13 @@ class FakeLive:
     async def __aenter__(self) -> FakeLive:
         self.client.lives.append(self)
         if self.client.gate is not None:
-            await self.client.gate.wait()
+            try:
+                await self.client.gate.wait()
+            except asyncio.CancelledError:
+                # Like the library (0.4.4): a cancelled start closes the session.
+                self.cancelled = True
+                self.exited.set()
+                raise
         if error := self.client.live_errors.get(self.terminal):
             raise error
         await self.renewed()

@@ -586,7 +586,7 @@ async def test_live_view_goes_before_queued_images(
     go2rtc: FakeGo2Rtc,
     hass_ws_client: Any,
 ) -> None:
-    """A live view waits for the image being taken, not for the queued ones."""
+    """A live view interrupts the image of another station and skips the queue."""
     client = _client(client_holder)
     media = camera_entry.runtime_data.media
     assert await _image(hass) == JPEG
@@ -601,15 +601,40 @@ async def test_live_view_goes_before_queued_images(
     await asyncio.sleep(0.05)
     ws = await hass_ws_client(hass)
     await _offer(ws, BACK_CAMERA)
-    await asyncio.sleep(0.05)
+    # The front session, still starting, was left for the live view.
+    await until(lambda: client.lives[2].cancelled)
+    assert client.lives[2].answer is None
     client.gate.set()
     session, answer, _candidate = await _events(ws, 3)
     assert session["type"] == "session"
     assert answer["type"] == "answer"
-    await until(lambda: client.lives[2].exited.is_set())
     # The queued back image opened no session of its own.
     assert [live.terminal for live in client.lives] == [101, 102, 101, 102]
     assert media.live_on(102)
+    # The front camera keeps its last image.
+    assert media.cached_image(101) == JPEG
+
+
+async def test_waiting_image_left_for_a_live_view(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    go2rtc: FakeGo2Rtc,
+    hass_ws_client: Any,
+) -> None:
+    """A first image interrupted by a live view returns no image, cleanly."""
+    client = _client(client_holder)
+    client.gate = asyncio.Event()
+    image = hass.async_create_task(_image(hass))
+    await until(lambda: len(client.lives) == 1)
+    ws = await hass_ws_client(hass)
+    await _offer(ws, BACK_CAMERA)
+    with pytest.raises(HomeAssistantError):
+        await image
+    assert client.lives[0].cancelled
+    client.gate.set()
+    await _events(ws, 3)
+    assert camera_entry.runtime_data.media.live_on(102)
 
 
 async def test_live_view_joins_the_image_session(

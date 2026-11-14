@@ -2,6 +2,13 @@
 
 All notable changes to this integration.
 
+## 0.4.10
+
+- Opening a live view interrupts the image being taken of another station,
+  instead of waiting for it (about 8 seconds on real hardware): that camera
+  keeps its last image. The library closes the interrupted session on the
+  station (0.4.4), so the live view does not find the station busy.
+
 ## 0.4.9
 
 - A live view goes before the camera images waiting for the session (#40):
