@@ -99,8 +99,9 @@ The intercom runs **one monitoring session at a time**, so the cameras take
 turns:
 
 - images of several cameras are taken one after the other. A live view
-  goes first: it waits only for the image being taken, if any, and the
-  other cameras keep their last image meanwhile;
+  goes first: it interrupts the image being taken of another station (that
+  camera keeps its last image), and joins the session of an image of its own
+  station;
 - while the live view of one station is open (or a call is answered), the
   other cameras keep their last image, and opening their live view shows an
   explanation instead. Close the live view first; a camera kept open for a

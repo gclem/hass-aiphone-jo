@@ -574,7 +574,26 @@ class CameraMedia:
             self._refreshes[station.id] = task
         if cached is not None and not self.live_on(station.id):
             return cached
-        return await asyncio.shield(task)
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if task.cancelled() and not (current and current.cancelling()):
+                # Interrupted by a live view of another station.
+                return self.cached_image(station.id)
+            raise
+
+    def _interrupt_refreshes(self, keep: int) -> None:
+        """Interrupt the image refreshes of other stations: a live view goes first.
+
+        A refresh stopped while the station answers the monitoring request is
+        closed by the library (no busy station afterwards). The refresh of the
+        viewer's own station goes on: the viewer joins its session.
+        """
+        for station_id, task in self._refreshes.items():
+            if station_id != keep and not task.done():
+                _LOGGER.debug("Image of station %s left for a live view", station_id)
+                task.cancel()
 
     async def _async_refresh(self, station: Station) -> bytes | None:
         """New image of the station, or its last one when none can be taken.
@@ -630,9 +649,10 @@ class CameraMedia:
             return
         try:
             # While waiting, image refreshes queued before the viewer skip
-            # their session; one already started is not interrupted.
+            # their session, and those of other stations are interrupted.
             self._waiting_viewers += 1
             try:
+                self._interrupt_refreshes(station.id)
                 await self._lock.acquire()
             finally:
                 self._waiting_viewers -= 1
