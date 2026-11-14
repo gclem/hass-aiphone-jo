@@ -176,7 +176,7 @@ class FakeGo2Rtc:
         if name not in self.streams:
             return web.Response(status=404)
         producers: list[dict[str, Any]] = [{"url": url} for url in self.streams[name]]
-        if name in self.pushed:
+        if self._live(name):
             receivers = (
                 [{"codec": {"codec_type": "video"}, "packets": 10, "bytes": 1000}]
                 if self.video

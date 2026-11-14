@@ -2,6 +2,14 @@
 
 All notable changes to this integration.
 
+## 0.4.5
+
+- While the live view is open, camera images wait for its video: when the
+  station renews its session, the live stream restarts and briefly carries
+  only sound, which made images fail (`codecs not matched`) (#32).
+- The README explains that the Problem entity keeps the last problem, while
+  the Cloud connection sensor gives the current state.
+
 ## 0.4.4
 
 - Device lookups no longer use the device registry call deprecated in Home
