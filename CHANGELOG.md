@@ -2,7 +2,7 @@
 
 All notable changes to this integration.
 
-## Unreleased
+## 0.4.6
 
 - One camera per entrance station (#32): installations with several
   entrance stations, for example on both sides of a gate, can now view each
