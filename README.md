@@ -98,7 +98,9 @@ output buttons keep working during a live view.
 The intercom runs **one monitoring session at a time**, so the cameras take
 turns:
 
-- images of several cameras are taken one after the other;
+- images of several cameras are taken one after the other. A live view
+  goes first: it waits only for the image being taken, if any, and the
+  other cameras keep their last image meanwhile;
 - while the live view of one station is open (or a call is answered), the
   other cameras keep their last image, and opening their live view shows an
   explanation instead. Close the live view first; a camera kept open for a
