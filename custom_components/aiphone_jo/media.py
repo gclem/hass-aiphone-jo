@@ -1,11 +1,16 @@
 """Live view and still images of the entrance stations through go2rtc.
 
 Each live view or image opens a monitoring session on an entrance station and
-pushes it into a go2rtc stream. The station ends each session after about a
-minute; while viewers are connected, a new session is opened each time and
-viewers keep watching through the relay stream (see :mod:`.go2rtc`), with a
-gap of a few seconds. Without the relay (go2rtc's RTSP server disabled),
-viewers read the session stream and the live view stops with the session.
+pushes it into a go2rtc stream. The intercom runs one session at a time, so
+the cameras of the entrance stations share it: while it serves the live view
+of one station (or an answered call), the other cameras keep their last
+image.
+
+The station ends each session after about a minute; while viewers are
+connected, a new session is opened each time and viewers keep watching
+through the relay stream (see :mod:`.go2rtc`), with a gap of a few seconds.
+Without the relay (go2rtc's RTSP server disabled), viewers read the session
+stream and the live view stops with the session.
 """
 
 from __future__ import annotations
@@ -15,7 +20,7 @@ import contextlib
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.camera import (
     WebRTCAnswer,
@@ -39,13 +44,12 @@ from .go2rtc import (
 )
 from .health import PROBLEM_CAMERA_FAILED
 from .talk import SendOffer, TalkPath, TalkServer
-from .vendor.aiphone_jo import AiphoneJoError, StationBusyError
+from .vendor.aiphone_jo import AiphoneJoError
 
 if TYPE_CHECKING:
     from .coordinator import AiphoneJoRuntime
 
 _LOGGER = logging.getLogger(__name__)
-_T = TypeVar("_T")
 
 VIDEO_TIMEOUT = 20.0
 # Seconds an image of the live view waits for video: when the station renews
@@ -66,7 +70,10 @@ LIVE_STOPPED = (
     "The live view stopped: no new session could be opened on the entrance "
     "station. Open the camera again to retry."
 )
-CALL_STARTED = "A call was answered: open the camera again to see the visitor."
+CALL_STARTED = (
+    "A call was answered: open the camera of the entrance station that rang "
+    "to see the visitor."
+)
 CALL_ENDED = "The call ended."
 STOP_MESSAGES = {
     "live_ended": LIVE_ENDED,
@@ -75,12 +82,8 @@ STOP_MESSAGES = {
 }
 
 
-class NoStationError(AiphoneJoError):
-    """No entrance station with a camera is known."""
-
-
 class MediaBusyError(AiphoneJoError):
-    """A live view uses the monitoring session."""
+    """A live view or a call uses the monitoring session."""
 
 
 def _timeout(limit: float, step: str) -> TimeoutError:
@@ -88,26 +91,31 @@ def _timeout(limit: float, step: str) -> TimeoutError:
 
 
 class StationRingingError(AiphoneJoError):
-    """The only camera station is calling: monitoring it may end the call."""
+    """The station is calling: monitoring it may end the call."""
 
 
 STATION_RINGING = (
-    "An entrance station is ringing: opening the live view now could end the "
+    "This entrance station is ringing: opening the live view now could end the "
     "call. Answer the call to see the visitor, or open the camera again when "
     "the ringing stops."
+)
+CAMERA_BUSY = (
+    "The intercom shows one entrance station at a time, and another one is "
+    "being viewed or is in a call. Close it, or open this camera again when "
+    "it ends."
 )
 
 
 class CameraMedia:
-    """Shared live session, viewers and cached still images."""
+    """Live session shared by the cameras, viewers and cached still images."""
 
     def __init__(self, hass: HomeAssistant, runtime: AiphoneJoRuntime) -> None:
         """Initialize."""
         self._hass = hass
         self._runtime = runtime
         entry = runtime.entry
-        self._image: bytes | None = None
-        self._image_at: float | None = None
+        # Last image of each station, and when it was taken (monotonic).
+        self._images: dict[int, tuple[bytes, float]] = {}
         self._logged_error: str | None = None
         server = async_get_server(hass, dict(entry.options))
         self._bridge = (
@@ -119,7 +127,9 @@ class CameraMedia:
         elif self._bridge is None:
             self.unavailable_reason = ISSUE_GO2RTC_UNAVAILABLE
         self._live: Any = None
+        self._live_station: int | None = None
         self._call_session: Any = None
+        self._call_station: int | None = None
         self._call_stream: str | None = None
         self._talk_server: TalkServer | None = None
         self._talk: TalkPath | None = None
@@ -127,8 +137,9 @@ class CameraMedia:
         self._stopper: asyncio.Task[None] | None = None
         self._continuous: bool | None = None
         self._users = 0
-        self._start_lock = asyncio.Lock()
-        self._image_lock = asyncio.Lock()
+        # One image or session start at a time: an image of one station never
+        # makes a viewer of another station fail, it only delays it.
+        self._lock = asyncio.Lock()
         self._viewers: dict[str, tuple[Go2RtcViewer, WebRTCSendMessage]] = {}
 
     # ------------------------------------------------------------ status
@@ -142,6 +153,24 @@ class CameraMedia:
     def live(self) -> bool:
         """True while a live or call session feeds the stream."""
         return self._live is not None or self._call_session is not None
+
+    @property
+    def session_station(self) -> int | None:
+        """Station whose session feeds the stream, if any."""
+        if self._call_session is not None:
+            return self._call_station
+        if self._live is not None:
+            return self._live_station
+        return None
+
+    def live_on(self, station_id: int) -> bool:
+        """True while a live or call session of the station feeds the stream."""
+        return self.live and self.session_station == station_id
+
+    def cached_image(self, station_id: int) -> bytes | None:
+        """Last image of the station, if any."""
+        cached = self._images.get(station_id)
+        return cached[0] if cached is not None else None
 
     @property
     def _viewer_stream(self) -> str | None:
@@ -182,76 +211,59 @@ class CameraMedia:
         else:
             _LOGGER.debug("Camera image or live view failed: %s", key)
 
-    def _ringing_only(self) -> bool:
-        """True when every camera station is calling: keep the last image."""
-        runtime = self._runtime
-        return runtime.ringing_station_id is not None and not runtime.session_stations(
-            media=True
-        )
+    def _keep(self, station_id: int) -> bool:
+        """True when the station's last image is returned without a session."""
+        if self.live_on(station_id):
+            return False
+        cached = self._images.get(station_id)
+        if cached is not None and time.monotonic() - cached[1] < self.refresh_interval:
+            return True
+        if station_id == self._runtime.ringing_station_id:
+            # Monitoring the station that calls may end the call.
+            return True
+        # The session serves the live view of another station, or a call.
+        return bool(self._viewers) or self._call_session is not None
 
-    def _fresh(self) -> bool:
-        return (
-            self._image is not None
-            and self._image_at is not None
-            and time.monotonic() - self._image_at < self.refresh_interval
-        )
-
-    def _store(self, image: bytes) -> None:
-        self._image = image
-        self._image_at = time.monotonic()
+    def _store(self, station_id: int, image: bytes) -> None:
+        self._images[station_id] = (image, time.monotonic())
         if self._logged_error is not None:
             _LOGGER.info("Camera images are available again")
             self._logged_error = None
 
     # -------------------------------------------------------- live session
 
-    async def _with_station(self, action: Callable[[Station], Awaitable[_T]]) -> _T:
-        stations = self._runtime.session_stations(media=True)
-        if not stations:
-            if self._runtime.ringing_station_id is not None:
-                raise StationRingingError("The entrance station is ringing")
-            raise NoStationError("No entrance station with a camera")
-        busy: StationBusyError | None = None
-        for station in stations:
-            try:
-                return await action(station)
-            except StationBusyError as err:
-                busy = err
-        assert busy is not None
-        raise busy
+    def _check_not_ringing(self, station: Station) -> None:
+        if station.id == self._runtime.ringing_station_id:
+            raise StationRingingError("The entrance station is ringing")
 
-    async def _async_start(self) -> None:
+    async def _async_start(self, station: Station) -> None:
         bridge = self._bridge
         assert bridge is not None
-        async with self._start_lock:
-            if self.live:
-                return
-            client: Any = self._runtime.client
-            if self._continuous is None:
-                self._continuous = await bridge.async_relay_supported()
-            # Renewed sessions only reach viewers through the relay. Image-only
-            # sessions are renewed too, so that a viewer can join them.
-            renew = self._continuous
-
-            async def enter(station: Station) -> Any:
-                live = client.live_monitor(bridge.async_ingest, station.id, renew=renew)
-                await live.__aenter__()
-                return live
-
-            async with self._runtime.session_lock:
-                await bridge.async_ensure_stream()
-                if renew:
-                    await bridge.async_ensure_relay()
-                live = await self._with_station(enter)
-            self._live = live
-            self._watch = self._runtime.entry.async_create_background_task(
-                self._hass, self._async_watch(live, renew), f"{DOMAIN} live session"
-            )
-            try:
-                await bridge.async_wait_video(VIDEO_TIMEOUT)
-            except Go2RtcError:
-                await self._async_stop()
-                raise
+        client: Any = self._runtime.client
+        if self._continuous is None:
+            self._continuous = await bridge.async_relay_supported()
+        # Renewed sessions only reach viewers through the relay. Image-only
+        # sessions are renewed too, so that a viewer can join them.
+        renew = self._continuous
+        async with self._runtime.session_lock:
+            # The station may have started ringing while waiting for the lock.
+            self._check_not_ringing(station)
+            await bridge.async_ensure_stream()
+            if renew:
+                await bridge.async_ensure_relay()
+            live = client.live_monitor(bridge.async_ingest, station.id, renew=renew)
+            await live.__aenter__()
+        self._live = live
+        self._live_station = station.id
+        self.async_notify()
+        self._watch = self._runtime.entry.async_create_background_task(
+            self._hass, self._async_watch(live, renew), f"{DOMAIN} live session"
+        )
+        try:
+            await bridge.async_wait_video(VIDEO_TIMEOUT)
+        except Go2RtcError:
+            await self._async_stop()
+            raise
 
     async def _async_watch(self, live: Any, renew: bool) -> None:
         """Stop when the session ends, or when renewing it failed."""
@@ -267,6 +279,7 @@ class CameraMedia:
     async def _async_stop(self, *, notice: str | None = None) -> None:
         self._cancel_stopper()
         live, self._live = self._live, None
+        self._live_station = None
         watch, self._watch = self._watch, None
         if watch is not None and watch is not asyncio.current_task():
             watch.cancel()
@@ -280,6 +293,7 @@ class CameraMedia:
                 send_message(WebRTCError(notice, message))
             await viewer.async_close()
         if live is not None:
+            self.async_notify()
             with contextlib.suppress(Exception):
                 await live.__aexit__(None, None, None)
 
@@ -295,12 +309,26 @@ class CameraMedia:
         if self._users == 0:
             await self._async_stop()
 
-    async def async_acquire(self) -> None:
-        """Use the live session, starting it if needed."""
+    async def async_acquire(self, station: Station) -> None:
+        """Use the live session of the station, starting it if needed.
+
+        Called with the media lock held. A session kept for a returning viewer
+        of another station is stopped first; one with viewers, or a call, is
+        never taken over (``MediaBusyError``).
+        """
+        if self.live_on(station.id):
+            # Joining a running session opens no new one, even while ringing.
+            self._users += 1
+            self._cancel_stopper()
+            return
+        self._check_not_ringing(station)
+        if self.live:
+            if self._users or self._call_session is not None:
+                raise MediaBusyError("Another entrance station is monitored")
+            await self._async_stop()
         self._users += 1
-        self._cancel_stopper()
         try:
-            await self._async_start()
+            await self._async_start(station)
         except BaseException:
             await self.async_release()
             raise
@@ -324,6 +352,7 @@ class CameraMedia:
         """Stop everything (unload)."""
         self._users = 0
         self._call_session = None
+        self._call_station = None
         await self._async_stop()
         await self._async_close_call_stream()
         server, self._talk_server = self._talk_server, None
@@ -376,9 +405,11 @@ class CameraMedia:
 
         return negotiate
 
-    def async_attach_call(self, session: Any) -> None:
-        """The call stream is fed by an answered call."""
+    def async_attach_call(self, session: Any, station_id: int | None = None) -> None:
+        """The call stream is fed by an answered call of the station."""
         self._call_session = session
+        self._call_station = station_id
+        self.async_notify()
 
     async def _async_close_call_stream(self) -> None:
         talk, self._talk = self._talk, None
@@ -394,6 +425,8 @@ class CameraMedia:
         """The call ended (or could not be answered): close its stream."""
         if self._call_session is not None:
             self._call_session = None
+            self._call_station = None
+            self.async_notify()
             await self._async_stop(notice="call_ended")
         await self._async_close_call_stream()
 
@@ -455,7 +488,8 @@ class CameraMedia:
             finally:
                 if lock is not None:
                     lock.release()
-        self._store(image)
+        if call.term_id is not None:
+            self._store(call.term_id, image)
         return image
 
     async def _async_leave_ring_fully(self, session: Any, bridge: Go2RtcBridge) -> None:
@@ -484,47 +518,60 @@ class CameraMedia:
 
     # ------------------------------------------------------------ images
 
-    async def async_image(self) -> bytes | None:
-        """Cached image, refreshed when older than the refresh interval."""
+    async def async_image(self, station: Station) -> bytes | None:
+        """Cached image of the station, refreshed when older than the interval.
+
+        While the session serves another station (live view or call), or while
+        the station rings, the last image is kept.
+        """
         bridge = self._bridge
-        if not self.available or bridge is None:
-            return self._image
-        if not self.live and (self._fresh() or self._ringing_only()):
-            return self._image
-        async with self._image_lock:
-            if not self.live and (self._fresh() or self._ringing_only()):
-                return self._image
+        if not self.available or bridge is None or self._keep(station.id):
+            return self.cached_image(station.id)
+        async with self._lock:
+            if self._keep(station.id):
+                return self.cached_image(station.id)
             try:
-                if self.live:
+                if self.live_on(station.id):
                     stream = self._viewer_stream
                     await bridge.async_wait_video(LIVE_IMAGE_WAIT, stream=stream)
                     image = await bridge.async_frame(stream)
                 else:
-                    await self.async_acquire()
+                    await self.async_acquire(station)
                     try:
                         image = await bridge.async_frame()
                     finally:
                         await self.async_release()
+            except (MediaBusyError, StationRingingError) as err:
+                _LOGGER.debug("Last camera image kept: %s", err)
+                return self.cached_image(station.id)
             except (AiphoneJoError, Go2RtcError) as err:
                 self._log_error(err)
-                return self._image
-            self._store(image)
+                return self.cached_image(station.id)
+            self._store(station.id, image)
             return image
 
     # ----------------------------------------------------------- viewers
 
     async def async_open_viewer(
-        self, session_id: str, offer_sdp: str, send_message: WebRTCSendMessage
+        self,
+        station: Station | None,
+        session_id: str,
+        offer_sdp: str,
+        send_message: WebRTCSendMessage,
     ) -> None:
-        """Connect a browser to the live view."""
+        """Connect a browser to the live view of the station."""
         bridge = self._bridge
-        if not self.available or bridge is None:
+        if not self.available or bridge is None or station is None:
             send_message(WebRTCError("unavailable", "The camera is unavailable."))
             return
         try:
-            await self.async_acquire()
+            async with self._lock:
+                await self.async_acquire(station)
         except StationRingingError:
             send_message(WebRTCError("station_ringing", STATION_RINGING))
+            return
+        except MediaBusyError:
+            send_message(WebRTCError("camera_busy", CAMERA_BUSY))
             return
         except (AiphoneJoError, Go2RtcError) as err:
             self._log_error(err)
@@ -565,6 +612,6 @@ class CameraMedia:
             await self.async_release(VIEWER_GRACE)
 
     def async_notify(self) -> None:
-        """Refresh entity states."""
+        """Refresh entity states (which camera is streaming)."""
         entry_id = self._runtime.entry.entry_id
         async_dispatcher_send(self._hass, f"{DOMAIN}_{entry_id}_update")

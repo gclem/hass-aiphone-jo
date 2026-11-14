@@ -108,7 +108,7 @@
     "step": {
       "init": {
         "title": "Options",
-        "description": "Les boutons de sortie et la caméra utilisent une courte session de surveillance portée par une platine de rue. Si elle est occupée, les autres platines sont essayées. La caméra a besoin de go2rtc.",
+        "description": "Les boutons de sortie utilisent une courte session de surveillance portée par une platine de rue : la préférée d'abord, puis les autres si elle est occupée. Chaque platine de rue a sa propre caméra, qui a besoin de go2rtc ; l'interphone n'affiche qu'une platine à la fois.",
         "data": {
           "station": "Platine de rue préférée",
           "image_refresh_interval": "Intervalle de rafraîchissement de l'image",
@@ -120,10 +120,11 @@
           "call_talk": "Parler au visiteur (expérimental)"
         },
         "data_description": {
+          "station": "Utilisée en premier par les boutons de sortie, et affichée par l'entité Caméra. Les autres platines de rue ont leur propre entité caméra.",
           "image_refresh_interval": "Délai minimal entre deux images de la caméra (10 à 3600 secondes). L'image n'est rafraîchie que lorsqu'elle est affichée, et chaque rafraîchissement ouvre une session de surveillance sur la platine de rue.",
           "go2rtc_url": "Laissez vide pour utiliser le serveur go2rtc lancé par Home Assistant (Home Assistant OS et Container). Renseignez-la pour une installation Home Assistant Core ou un go2rtc externe, par exemple http://192.0.2.10:1984.",
-          "ring_snapshot": "Capture une image du visiteur à chaque sonnerie, sans décrocher : l'appel continue de sonner sur tous les téléphones. L'image est affichée par l'entité Dernier visiteur et par la caméra, et liée dans l'événement aiphone_jo_ring pour les notifications. Expérimental : pas encore validé sur le matériel réel.",
-          "call_answering": "Ajoute les boutons Décrocher, Raccrocher et Refuser ainsi qu'un capteur d'état d'appel. Quand vous décrochez, le live de la caméra montre le visiteur et diffuse son son ; pour lui parler, activez aussi l'option suivante. Expérimental : pas encore validé sur le matériel réel. Un appel est raccroché automatiquement au bout de 200 secondes, comme dans l'application officielle.",
+          "ring_snapshot": "Capture une image du visiteur à chaque sonnerie, sans décrocher : l'appel continue de sonner sur tous les téléphones. L'image est affichée par l'entité Dernier visiteur et par la caméra de cette platine, et liée dans l'événement aiphone_jo_ring pour les notifications. Expérimental : pas encore validé sur le matériel réel.",
+          "call_answering": "Ajoute les boutons Décrocher, Raccrocher et Refuser ainsi qu'un capteur d'état d'appel. Quand vous décrochez, le live de la caméra de la platine qui a sonné montre le visiteur et diffuse son son ; pour lui parler, activez aussi l'option suivante. Expérimental : pas encore validé sur le matériel réel. Un appel est raccroché automatiquement au bout de 200 secondes, comme dans l'application officielle.",
           "call_talk": "Avec le décroché des appels, permet de parler au visiteur depuis le live de la caméra, grâce à l'audio bidirectionnel de Home Assistant (une fonctionnalité en avant-première des versions récentes). Nécessite le serveur go2rtc lancé par Home Assistant. Expérimental : pas encore validé sur le matériel réel ; désactivez-le si le décroché échoue."
         }
       }
@@ -186,7 +187,20 @@
     },
     "camera": {
       "camera": {
-        "name": "Caméra"
+        "name": "Caméra",
+        "state_attributes": {
+          "station": {
+            "name": "Platine de rue"
+          }
+        }
+      },
+      "station_camera": {
+        "name": "Caméra {station}",
+        "state_attributes": {
+          "station": {
+            "name": "Platine de rue"
+          }
+        }
       }
     },
     "event": {

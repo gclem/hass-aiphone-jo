@@ -226,7 +226,7 @@ class CallController:
                 )
                 raise _error("call_failed", code=type(err).__name__) from err
             self._session = session
-            media.async_attach_call(session)
+            media.async_attach_call(session, call.term_id)
         self.started_at = datetime.now().astimezone()
         self._set(CallState.TALKING)
         self._cancel_timeout = async_call_later(

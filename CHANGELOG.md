@@ -2,6 +2,22 @@
 
 All notable changes to this integration.
 
+## Unreleased
+
+- One camera per entrance station (#32): installations with several
+  entrance stations, for example on both sides of a gate, can now view each
+  of them. **Camera** keeps showing the station chosen in the options (same
+  entity, so dashboards keep working); each other station gets a camera
+  named after it, such as **Back camera**. The intercom runs one monitoring
+  session at a time: images are taken one after the other, and while a live
+  view or an answered call uses the session, the other cameras keep their
+  last image and refuse their live view with an explanation.
+- A camera only shows its own station: when it is busy or ringing, the last
+  image is kept instead of an image of another station. The visitor's image
+  captured on ring is shown by the camera of the station that rang.
+- Cameras report `streaming` while their live view or call runs, and have a
+  `station` attribute.
+
 ## 0.4.5
 
 - While the live view is open, camera images wait for its video: when the

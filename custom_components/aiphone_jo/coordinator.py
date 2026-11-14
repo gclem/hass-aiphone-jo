@@ -157,22 +157,26 @@ class AiphoneJoRuntime:
             return None
         return call.term_id
 
-    def session_stations(self, *, media: bool = False) -> list[Station]:
-        """Camera stations for a monitoring session, the one chosen first.
+    @property
+    def camera_stations(self) -> list[Station]:
+        """Entrance stations with a camera, the one chosen in the options first."""
+        preferred = self.entry.options.get(CONF_STATION)
+        cameras = [station for station in self.stations if station.camera]
+        return sorted(cameras, key=lambda station: station.id != preferred)
+
+    def session_stations(self) -> list[Station]:
+        """Stations for an output command, the one chosen in the options first.
 
         Monitoring a station while it calls may end the call on every phone:
-        images and live views never monitor it (``media``), and the output
-        buttons only use it as a last resort.
+        the output buttons only use it as a last resort. Images and live views
+        never monitor it (see :mod:`.media`).
         """
         preferred = self.entry.options.get(CONF_STATION)
         ringing = self.ringing_station_id
-        stations = sorted(
+        return sorted(
             self.stations,
             key=lambda station: (station.id == ringing, station.id != preferred),
         )
-        if media and ringing is not None:
-            return [station for station in stations if station.id != ringing]
-        return stations
 
     async def async_pulse(self, output: Output) -> None:
         """Pulse a monitor output; one monitoring session at a time."""

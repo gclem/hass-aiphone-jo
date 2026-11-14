@@ -101,7 +101,7 @@ async def test_capture_without_answering(
     entity = hass.data["image"].get_entity(IMAGE)
     assert await entity.async_image() == JPEG
     # The camera shows the visitor too, without a new session.
-    assert await runtime.media.async_image() == JPEG
+    assert await runtime.media.async_image(runtime.camera_stations[0]) == JPEG
     assert len(client.call_sessions) == 1
     assert hass.states.get("binary_sensor.aiphone_jo_1mdw_ringing").state == "on"
 
@@ -233,7 +233,7 @@ async def test_live_view_busy(
     await _setup(hass, config_entry, **{CONF_RING_SNAPSHOT: True})
     client = _client(client_holder)
     media = config_entry.runtime_data.media
-    await media.async_acquire()
+    await media.async_acquire(config_entry.runtime_data.camera_stations[0])
     try:
         await _ring(hass, client)
         await until(lambda: ring_events)

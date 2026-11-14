@@ -154,6 +154,8 @@ async def test_ring_then_answer_and_hang_up(
     assert hass.states.get(HANG_UP).state != STATE_UNAVAILABLE
     media = call_entry.runtime_data.media
     assert media.live
+    assert media.live_on(101)
+    assert not media.live_on(102)
     assert client.lives == []
 
     await _press(hass, HANG_UP)
@@ -350,6 +352,21 @@ async def test_answer_replaces_live_view(
     assert (await ws2.receive_json())["success"]
     for _ in range(3):
         await ws2.receive_json()
+    assert len(client.lives) == 1
+
+    # The other station's camera waits for the end of the call.
+    ws3 = await hass_ws_client(hass)
+    await ws3.send_json_auto_id(
+        {
+            "type": "camera/webrtc/offer",
+            "entity_id": "camera.aiphone_jo_1mdw_back_camera",
+            "offer": "v=0 offer",
+        }
+    )
+    assert (await ws3.receive_json())["success"]
+    await ws3.receive_json()  # Session.
+    event = (await ws3.receive_json())["event"]
+    assert event["code"] == "camera_busy"
     assert len(client.lives) == 1
 
     await _press(hass, HANG_UP)
