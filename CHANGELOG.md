@@ -2,6 +2,14 @@
 
 All notable changes to this integration.
 
+## 0.4.8
+
+- Camera images are refreshed in the background. Home Assistant gives up on a
+  camera image after 10 seconds, about the time a monitoring session takes to
+  start: images that took longer were lost and the camera showed an error. A
+  camera now returns its last image at once while the new one is taken for
+  the next refresh, and an image is kept even when Home Assistant gave up.
+
 ## 0.4.7
 
 - A camera without any image yet (after a restart) waits up to 15 seconds for

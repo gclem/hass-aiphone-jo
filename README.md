@@ -86,7 +86,9 @@ another go2rtc server (1.9.15 or later), enter its URL in the options.
 - **Still image**: refreshed only while it is displayed (for example on a
   dashboard card), at most once per refresh interval (30 seconds by default,
   configurable from 10 to 3600 seconds in the options). Otherwise the last
-  image is kept. While a live view runs, images come from it.
+  image is kept. While a live view runs, images come from it. A new image
+  takes several seconds (a monitoring session starts each time): the camera
+  shows the last image at once and the new one at the next refresh.
 
 Each image or live view opens a monitoring session on the entrance station.
 Depending on the installation, this may turn on the monitor screen or the

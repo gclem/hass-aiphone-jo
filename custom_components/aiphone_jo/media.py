@@ -144,6 +144,7 @@ class CameraMedia:
         # One image or session start at a time: an image of one station never
         # makes a viewer of another station fail, it only delays it.
         self._lock = asyncio.Lock()
+        self._refreshes: dict[int, asyncio.Task[bytes | None]] = {}
         self._viewers: dict[str, tuple[Go2RtcViewer, WebRTCSendMessage]] = {}
 
     # ------------------------------------------------------------ status
@@ -544,15 +545,38 @@ class CameraMedia:
     # ------------------------------------------------------------ images
 
     async def async_image(self, station: Station) -> bytes | None:
-        """Cached image of the station, refreshed when older than the interval.
+        """Image of the station, refreshed when older than the refresh interval.
+
+        Home Assistant gives up on a camera image after 10 seconds, about the
+        time a monitoring session takes to start. So the refresh runs in the
+        background: a camera that has an image returns it at once while the
+        refresh serves the next request, and a camera without any image waits
+        for the refresh, which still completes if Home Assistant gives up.
+        """
+        if not self.available or self._bridge is None:
+            return self.cached_image(station.id)
+        cached = self.cached_image(station.id)
+        if cached is not None and self._keep(station.id):
+            return cached
+        task = self._refreshes.get(station.id)
+        if task is None or task.done():
+            task = self._runtime.entry.async_create_background_task(
+                self._hass, self._async_refresh(station), f"{DOMAIN} camera image"
+            )
+            self._refreshes[station.id] = task
+        if cached is not None and not self.live_on(station.id):
+            return cached
+        return await asyncio.shield(task)
+
+    async def _async_refresh(self, station: Station) -> bytes | None:
+        """New image of the station, or its last one when none can be taken.
 
         While the session serves another station (live view or call), or while
         the station rings, the last image is kept. A camera without any image
         yet first waits a little for the session to be free.
         """
         bridge = self._bridge
-        if not self.available or bridge is None:
-            return self.cached_image(station.id)
+        assert bridge is not None
         await self._async_wait_first_image(station.id)
         if self._keep(station.id):
             return self.cached_image(station.id)

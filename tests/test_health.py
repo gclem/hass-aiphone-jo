@@ -377,6 +377,7 @@ async def test_single_station_ringing_keeps_last_image(
     client.emit(CallUpdatedEvent(call))
     await hass.async_block_till_done()
     assert await media.async_image(front) == JPEG
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert len(client.lives) == 2
 
 
