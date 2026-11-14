@@ -55,6 +55,10 @@ VIDEO_TIMEOUT = 20.0
 # Seconds an image of the live view waits for video: when the station renews
 # its session, the live stream restarts and briefly carries no video.
 LIVE_IMAGE_WAIT = 8.0
+# Seconds a camera without any image yet (after a restart) waits for the
+# session used by another station, instead of returning no image at all.
+FIRST_IMAGE_WAIT = 15.0
+FIRST_IMAGE_POLL = 0.5
 SESSION_POLL = 1.0
 # Seconds the live session is kept after the last viewer left, so a viewer that
 # reconnects (dashboard reload, dialog reopened) does not open a new session.
@@ -223,6 +227,27 @@ class CameraMedia:
             return True
         # The session serves the live view of another station, or a call.
         return bool(self._viewers) or self._call_session is not None
+
+    def _busy_elsewhere(self, station_id: int) -> bool:
+        """True while the session serves another station (live view, call)."""
+        if self.live_on(station_id):
+            return False
+        return (
+            bool(self._viewers)
+            or self._call_session is not None
+            or (self.live and self._users > 0)
+        )
+
+    async def _async_wait_first_image(self, station_id: int) -> None:
+        """Without any image of the station yet, wait for the session a while."""
+        if self.cached_image(station_id) is not None:
+            return
+        with contextlib.suppress(TimeoutError):
+            async with asyncio.timeout(FIRST_IMAGE_WAIT):
+                while True:
+                    if not self._busy_elsewhere(station_id):
+                        return
+                    await asyncio.sleep(FIRST_IMAGE_POLL)
 
     def _store(self, station_id: int, image: bytes) -> None:
         self._images[station_id] = (image, time.monotonic())
@@ -522,10 +547,14 @@ class CameraMedia:
         """Cached image of the station, refreshed when older than the interval.
 
         While the session serves another station (live view or call), or while
-        the station rings, the last image is kept.
+        the station rings, the last image is kept. A camera without any image
+        yet first waits a little for the session to be free.
         """
         bridge = self._bridge
-        if not self.available or bridge is None or self._keep(station.id):
+        if not self.available or bridge is None:
+            return self.cached_image(station.id)
+        await self._async_wait_first_image(station.id)
+        if self._keep(station.id):
             return self.cached_image(station.id)
         async with self._lock:
             if self._keep(station.id):

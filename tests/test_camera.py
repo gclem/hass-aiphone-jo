@@ -567,6 +567,52 @@ async def test_live_view_of_another_station(
     assert hass.states.get(BACK_CAMERA).state == "streaming"
 
 
+async def test_first_image_waits_for_the_session(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    go2rtc: FakeGo2Rtc,
+    hass_ws_client: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A camera without any image waits for another station's live view."""
+    monkeypatch.setattr("custom_components.aiphone_jo.media.FIRST_IMAGE_POLL", 0.05)
+    client = _client(client_holder)
+    front_ws = await hass_ws_client(hass)
+    front = await _offer(front_ws)
+    await _events(front_ws, 3)
+    assert [live.terminal for live in client.lives] == [101]
+
+    image = hass.async_create_task(_image(hass, BACK_CAMERA))
+    await asyncio.sleep(0.3)
+    assert not image.done()
+    await front_ws.send_json_auto_id(
+        {"type": "unsubscribe_events", "subscription": front}
+    )
+    await front_ws.receive_json()
+    assert await image == JPEG
+    assert [live.terminal for live in client.lives] == [101, 102]
+
+
+async def test_first_image_gives_up(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    hass_ws_client: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without any image, a camera still busy after the wait has no image."""
+    monkeypatch.setattr("custom_components.aiphone_jo.media.FIRST_IMAGE_WAIT", 0.3)
+    monkeypatch.setattr("custom_components.aiphone_jo.media.FIRST_IMAGE_POLL", 0.05)
+    client = _client(client_holder)
+    front_ws = await hass_ws_client(hass)
+    await _offer(front_ws)
+    await _events(front_ws, 3)
+    with pytest.raises(HomeAssistantError):
+        await _image(hass, BACK_CAMERA)
+    assert [live.terminal for live in client.lives] == [101]
+
+
 async def test_unload_stops_live_view(
     hass: HomeAssistant,
     camera_entry: MockConfigEntry,
