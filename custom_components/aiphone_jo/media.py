@@ -144,6 +144,8 @@ class CameraMedia:
         # One image or session start at a time: an image of one station never
         # makes a viewer of another station fail, it only delays it.
         self._lock = asyncio.Lock()
+        # Viewers waiting for the lock: image refreshes give way to them.
+        self._waiting_viewers = 0
         self._refreshes: dict[int, asyncio.Task[bytes | None]] = {}
         self._viewers: dict[str, tuple[Go2RtcViewer, WebRTCSendMessage]] = {}
 
@@ -226,8 +228,13 @@ class CameraMedia:
         if station_id == self._runtime.ringing_station_id:
             # Monitoring the station that calls may end the call.
             return True
-        # The session serves the live view of another station, or a call.
-        return bool(self._viewers) or self._call_session is not None
+        # The session serves the live view of another station, or a call; or
+        # a live view is about to start, which goes before any image.
+        return (
+            bool(self._viewers)
+            or self._waiting_viewers > 0
+            or self._call_session is not None
+        )
 
     def _busy_elsewhere(self, station_id: int) -> bool:
         """True while the session serves another station (live view, call)."""
@@ -235,6 +242,7 @@ class CameraMedia:
             return False
         return (
             bool(self._viewers)
+            or self._waiting_viewers > 0
             or self._call_session is not None
             or (self.live and self._users > 0)
         )
@@ -593,7 +601,10 @@ class CameraMedia:
                     try:
                         image = await bridge.async_frame()
                     finally:
-                        await self.async_release()
+                        # A viewer of the same station waiting meanwhile joins
+                        # this session instead of opening a new one.
+                        grace = VIEWER_GRACE if self._waiting_viewers else 0
+                        await self.async_release(grace)
             except (MediaBusyError, StationRingingError) as err:
                 _LOGGER.debug("Last camera image kept: %s", err)
                 return self.cached_image(station.id)
@@ -618,8 +629,17 @@ class CameraMedia:
             send_message(WebRTCError("unavailable", "The camera is unavailable."))
             return
         try:
-            async with self._lock:
+            # While waiting, image refreshes queued before the viewer skip
+            # their session; one already started is not interrupted.
+            self._waiting_viewers += 1
+            try:
+                await self._lock.acquire()
+            finally:
+                self._waiting_viewers -= 1
+            try:
                 await self.async_acquire(station)
+            finally:
+                self._lock.release()
         except StationRingingError:
             send_message(WebRTCError("station_ringing", STATION_RINGING))
             return

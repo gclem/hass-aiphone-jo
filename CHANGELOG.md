@@ -2,6 +2,14 @@
 
 All notable changes to this integration.
 
+## Unreleased
+
+- A live view goes before the camera images waiting for the session (#40):
+  it waits only for the image being taken, if any, instead of every image
+  queued before it (up to about 25 seconds with two cameras). An image of
+  the same station being taken when the live view opens is kept as its
+  session instead of being closed and opened again.
+
 ## 0.4.8
 
 - Camera images are refreshed in the background. Home Assistant gives up on a

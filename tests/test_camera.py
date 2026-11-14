@@ -579,6 +579,65 @@ async def test_live_view_of_another_station(
     assert hass.states.get(BACK_CAMERA).state == "streaming"
 
 
+async def test_live_view_goes_before_queued_images(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    go2rtc: FakeGo2Rtc,
+    hass_ws_client: Any,
+) -> None:
+    """A live view waits for the image being taken, not for the queued ones."""
+    client = _client(client_holder)
+    media = camera_entry.runtime_data.media
+    assert await _image(hass) == JPEG
+    assert await _image(hass, BACK_CAMERA) == JPEG
+    _age_cache(camera_entry, 31, 101)
+    _age_cache(camera_entry, 31, 102)
+    client.gate = asyncio.Event()
+    # Both cameras return their last image at once and refresh it meanwhile:
+    # the front image starts a session, the back one waits for it.
+    assert await _image(hass) == JPEG
+    assert await _image(hass, BACK_CAMERA) == JPEG
+    await asyncio.sleep(0.05)
+    ws = await hass_ws_client(hass)
+    await _offer(ws, BACK_CAMERA)
+    await asyncio.sleep(0.05)
+    client.gate.set()
+    session, answer, _candidate = await _events(ws, 3)
+    assert session["type"] == "session"
+    assert answer["type"] == "answer"
+    await until(lambda: client.lives[2].exited.is_set())
+    # The queued back image opened no session of its own.
+    assert [live.terminal for live in client.lives] == [101, 102, 101, 102]
+    assert media.live_on(102)
+
+
+async def test_live_view_joins_the_image_session(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    go2rtc: FakeGo2Rtc,
+    hass_ws_client: Any,
+) -> None:
+    """A viewer waiting for an image of the same station keeps its session."""
+    client = _client(client_holder)
+    media = camera_entry.runtime_data.media
+    assert await _image(hass, BACK_CAMERA) == JPEG
+    _age_cache(camera_entry, 31, 102)
+    client.gate = asyncio.Event()
+    assert await _image(hass, BACK_CAMERA) == JPEG
+    await asyncio.sleep(0.05)
+    ws = await hass_ws_client(hass)
+    await _offer(ws, BACK_CAMERA)
+    await asyncio.sleep(0.05)
+    client.gate.set()
+    await _events(ws, 3)
+    await asyncio.sleep(0.1)  # Longer than the grace period.
+    assert [live.terminal for live in client.lives] == [102, 102]
+    assert not client.lives[1].exited.is_set()
+    assert media.live_on(102)
+
+
 async def test_first_image_waits_for_the_session(
     hass: HomeAssistant,
     camera_entry: MockConfigEntry,
