@@ -211,6 +211,10 @@ Problems are not only logged, they are reported in Home Assistant:
 - the diagnostics keep the recent connections, problems and the signaling of
   the last call: attach them to an issue.
 
+The Problem entity shows the **last** problem, even once it is solved: after a
+lost connection, it still says so while the Cloud connection sensor is back to
+connected. Use the sensor and the repairs for the current state.
+
 Messages never contain the identifiers of the terminal. Example of a
 notification for lasting problems only:
 

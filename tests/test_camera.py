@@ -312,6 +312,28 @@ async def test_webrtc_live_view(
     assert not camera_entry.runtime_data.media.live
 
 
+async def test_live_image_waits_for_video(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    go2rtc: FakeGo2Rtc,
+    hass_ws_client: Any,
+) -> None:
+    """While the live view restarts (session renewed), images wait for video."""
+    ws = await hass_ws_client(hass)
+    await _offer(ws)
+    await _events(ws, 3)
+    relay = f"aiphone_jo_{camera_entry.entry_id}_live"
+    go2rtc.video = False
+    image = hass.async_create_task(_image(hass))
+    await asyncio.sleep(0.3)
+    assert not image.done()
+    assert go2rtc.frames == []
+    go2rtc.video = True
+    assert await image == JPEG
+    assert go2rtc.frames == [relay]
+
+
 async def test_webrtc_continuous(
     hass: HomeAssistant,
     camera_entry: MockConfigEntry,

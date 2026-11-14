@@ -48,6 +48,9 @@ _LOGGER = logging.getLogger(__name__)
 _T = TypeVar("_T")
 
 VIDEO_TIMEOUT = 20.0
+# Seconds an image of the live view waits for video: when the station renews
+# its session, the live stream restarts and briefly carries no video.
+LIVE_IMAGE_WAIT = 8.0
 SESSION_POLL = 1.0
 # Seconds the live session is kept after the last viewer left, so a viewer that
 # reconnects (dashboard reload, dialog reopened) does not open a new session.
@@ -493,7 +496,9 @@ class CameraMedia:
                 return self._image
             try:
                 if self.live:
-                    image = await bridge.async_frame(self._viewer_stream)
+                    stream = self._viewer_stream
+                    await bridge.async_wait_video(LIVE_IMAGE_WAIT, stream=stream)
+                    image = await bridge.async_frame(stream)
                 else:
                     await self.async_acquire()
                     try:
