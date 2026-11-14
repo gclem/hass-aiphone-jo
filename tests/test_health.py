@@ -12,6 +12,7 @@ from homeassistant.components.camera import async_get_image
 from homeassistant.const import ATTR_ENTITY_ID, STATE_OFF, STATE_ON
 from homeassistant.core import Event, HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
@@ -279,7 +280,11 @@ async def test_command_failure_is_reported(
     client_holder: ClientHolder,
     errors: list[Event],
 ) -> None:
-    """A failed output pulse raises and is reported."""
+    """A failed output pulse raises and is reported, with the entry's device.
+
+    The device is found among the entry's own devices, without the deprecated
+    ``DeviceRegistry.async_get_device`` (#31, also guarded in every test).
+    """
     client = _client(client_holder)
     client.open_door.side_effect = ResponseTimeoutError("no reply")
     with pytest.raises(HomeAssistantError):
@@ -290,6 +295,9 @@ async def test_command_failure_is_reported(
     [event] = errors
     assert event.data["type"] == "command_failed"
     assert event.data["message"] == "Action 1: ResponseTimeoutError: no reply"
+    registry = dr.async_get(hass)
+    [device] = dr.async_entries_for_config_entry(registry, loaded_entry.entry_id)
+    assert event.data["device_id"] == device.id
 
 
 async def test_ring_snapshot_failure_is_reported(
