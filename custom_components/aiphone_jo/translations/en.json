@@ -108,7 +108,7 @@
     "step": {
       "init": {
         "title": "Options",
-        "description": "The output buttons and the camera use a short monitoring session carried by an entrance station. If it is busy, the other stations are tried. The camera needs go2rtc.",
+        "description": "The output buttons use a short monitoring session carried by an entrance station: the preferred one first, then the others if it is busy. Each entrance station has its own camera, which needs go2rtc; the intercom shows one station at a time.",
         "data": {
           "station": "Preferred entrance station",
           "image_refresh_interval": "Camera image refresh interval",
@@ -120,10 +120,11 @@
           "call_talk": "Talk to the visitor (experimental)"
         },
         "data_description": {
+          "station": "Used first by the output buttons, and shown by the Camera entity. The other entrance stations have their own camera entity.",
           "image_refresh_interval": "Minimum time between two camera images (10 to 3600 seconds). The image is only refreshed while it is displayed, and each refresh opens a monitoring session on the entrance station.",
           "go2rtc_url": "Leave empty to use the go2rtc server run by Home Assistant (Home Assistant OS and Container). Set it for a Home Assistant Core installation or an external go2rtc, for example http://192.0.2.10:1984.",
-          "ring_snapshot": "Captures an image of the visitor each time a station rings, without answering: the call keeps ringing on every phone. The image is shown by the Last visitor entity and the camera, and linked in the aiphone_jo_ring event for notifications. Experimental: not yet validated on real hardware.",
-          "call_answering": "Adds Answer, Hang up and Reject buttons and a call state sensor. When you answer, the camera live view shows and plays the visitor; to talk to the visitor, also enable the next option. Experimental: not yet validated on real hardware. A call is hung up automatically after 200 seconds, like in the official application.",
+          "ring_snapshot": "Captures an image of the visitor each time a station rings, without answering: the call keeps ringing on every phone. The image is shown by the Last visitor entity and the camera of that station, and linked in the aiphone_jo_ring event for notifications. Experimental: not yet validated on real hardware.",
+          "call_answering": "Adds Answer, Hang up and Reject buttons and a call state sensor. When you answer, the live view of the camera of the station that rang shows and plays the visitor; to talk to the visitor, also enable the next option. Experimental: not yet validated on real hardware. A call is hung up automatically after 200 seconds, like in the official application.",
           "call_talk": "With call answering, lets you talk to the visitor from the camera live view, with Home Assistant's two-way audio (a preview feature of recent versions). Needs the go2rtc server run by Home Assistant. Experimental: not yet validated on real hardware; disable it if answering fails."
         }
       }
@@ -186,7 +187,20 @@
     },
     "camera": {
       "camera": {
-        "name": "Camera"
+        "name": "Camera",
+        "state_attributes": {
+          "station": {
+            "name": "Entrance station"
+          }
+        }
+      },
+      "station_camera": {
+        "name": "{station} camera",
+        "state_attributes": {
+          "station": {
+            "name": "Entrance station"
+          }
+        }
       }
     },
     "event": {

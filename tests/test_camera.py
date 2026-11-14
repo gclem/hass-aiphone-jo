@@ -14,11 +14,12 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_ENTITY_ID, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.aiphone_jo.const import CONF_IMAGE_REFRESH, CONF_STATION, DOMAIN
-from custom_components.aiphone_jo.media import LIVE_ENDED, LIVE_STOPPED
+from custom_components.aiphone_jo.media import CAMERA_BUSY, LIVE_ENDED, LIVE_STOPPED
 from custom_components.aiphone_jo.vendor.aiphone_jo import (
     AiphoneJoError,
     Output,
@@ -29,6 +30,8 @@ from .conftest import ClientHolder, FakeClient, until
 from .fake_go2rtc import JPEG, VIEWER_ANSWER, VIEWER_CANDIDATE, FakeGo2Rtc
 
 CAMERA = "camera.aiphone_jo_1mdw_camera"
+BACK_CAMERA = "camera.aiphone_jo_1mdw_back_camera"
+FRONT_CAMERA = "camera.aiphone_jo_1mdw_front_camera"
 ACTION_1 = "button.aiphone_jo_1mdw_action_1"
 
 
@@ -58,14 +61,14 @@ def _client(holder: ClientHolder) -> FakeClient:
     return holder.client
 
 
-def _age_cache(entry: MockConfigEntry, seconds: float) -> None:
-    media = entry.runtime_data.media
-    assert media._image_at is not None
-    media._image_at -= seconds
+def _age_cache(entry: MockConfigEntry, seconds: float, station: int = 101) -> None:
+    images = entry.runtime_data.media._images
+    image, at = images[station]
+    images[station] = (image, at - seconds)
 
 
-async def _image(hass: HomeAssistant) -> bytes:
-    return (await async_get_image(hass, CAMERA)).content
+async def _image(hass: HomeAssistant, entity_id: str = CAMERA) -> bytes:
+    return (await async_get_image(hass, entity_id)).content
 
 
 async def test_capabilities(
@@ -122,7 +125,7 @@ async def test_refresh_interval_and_station_options(
     config_entry: MockConfigEntry,
     client_holder: ClientHolder,
 ) -> None:
-    """The interval and the station come from the options."""
+    """The interval and the station of the Camera entity come from the options."""
     hass.config_entries.async_update_entry(
         config_entry, options={CONF_STATION: 102, CONF_IMAGE_REFRESH: 120}
     )
@@ -131,12 +134,85 @@ async def test_refresh_interval_and_station_options(
     client = _client(client_holder)
     await _image(hass)
     assert client.lives[0].terminal == 102
-    _age_cache(config_entry, 100)
+    _age_cache(config_entry, 100, 102)
     await _image(hass)
     assert len(client.lives) == 1
-    _age_cache(config_entry, 21)
+    _age_cache(config_entry, 21, 102)
     await _image(hass)
     assert len(client.lives) == 2
+    await _image(hass, FRONT_CAMERA)
+    assert client.lives[2].terminal == 101
+
+
+async def test_one_camera_per_station(
+    hass: HomeAssistant, camera_entry: MockConfigEntry, client_holder: ClientHolder
+) -> None:
+    """Each entrance station has its own camera; Camera shows the preferred one."""
+    registry = er.async_get(hass)
+    unique_id = camera_entry.unique_id
+    assert registry.async_get(CAMERA).unique_id == f"{unique_id}_camera"
+    assert registry.async_get(BACK_CAMERA).unique_id == f"{unique_id}_camera_102"
+    assert hass.states.get(CAMERA).attributes["station"] == "Front"
+    back = hass.states.get(BACK_CAMERA)
+    assert back.attributes["station"] == "Back"
+    assert back.attributes["friendly_name"] == "Aiphone JO-1MDW Back camera"
+    client = _client(client_holder)
+    assert await _image(hass, BACK_CAMERA) == JPEG
+    assert await _image(hass) == JPEG
+    assert [live.terminal for live in client.lives] == [102, 101]
+    # Each station has its own cached image.
+    assert await _image(hass, BACK_CAMERA) == JPEG
+    assert len(client.lives) == 2
+
+
+async def test_station_option_moves_the_camera_entity(
+    hass: HomeAssistant, camera_entry: MockConfigEntry
+) -> None:
+    """Choosing another station keeps the Camera entity, which follows it."""
+    hass.config_entries.async_update_entry(camera_entry, options={CONF_STATION: 102})
+    await hass.async_block_till_done()
+    registry = er.async_get(hass)
+    unique_id = camera_entry.unique_id
+    cameras = {
+        entity.unique_id: entity.entity_id
+        for entity in er.async_entries_for_config_entry(registry, camera_entry.entry_id)
+        if entity.domain == "camera"
+    }
+    assert cameras == {
+        f"{unique_id}_camera": CAMERA,
+        f"{unique_id}_camera_101": FRONT_CAMERA,
+    }
+    assert hass.states.get(CAMERA).attributes["station"] == "Back"
+
+
+async def test_images_one_session_at_a_time(
+    hass: HomeAssistant,
+    go2rtc: FakeGo2Rtc,
+    config_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+) -> None:
+    """Images of both cameras requested together open one session after the other."""
+    overlaps: list[int | None] = []
+
+    def watch(client: FakeClient) -> None:
+        live_monitor = client.live_monitor
+
+        def checked(*args: Any, **kwargs: Any) -> Any:
+            if not all(live.exited.is_set() for live in client.lives):
+                overlaps.append(args[1])
+            return live_monitor(*args, **kwargs)
+
+        client.live_monitor = checked
+
+    client_holder.setup = watch
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    images = await asyncio.gather(_image(hass), _image(hass, BACK_CAMERA))
+    assert images == [JPEG, JPEG]
+    client = _client(client_holder)
+    assert sorted(live.terminal for live in client.lives) == [101, 102]
+    assert all(live.exited.is_set() for live in client.lives)
+    assert overlaps == []
 
 
 async def test_errors_keep_last_image(
@@ -172,14 +248,16 @@ async def test_no_video(
     assert _client(client_holder).lives[0].exited.is_set()
 
 
-async def test_busy_station_fallback(
+async def test_busy_station_keeps_its_camera(
     hass: HomeAssistant, camera_entry: MockConfigEntry, client_holder: ClientHolder
 ) -> None:
-    """A busy station (486) falls back to the next camera station."""
+    """A busy station (486) never shows another station's image."""
     client = _client(client_holder)
+    await _image(hass)
+    _age_cache(camera_entry, 31)
     client.live_errors[101] = StationBusyError("busy", mid="24021", rslt=486)
     assert await _image(hass) == JPEG
-    assert [live.terminal for live in client.lives] == [101, 102]
+    assert [live.terminal for live in client.lives] == [101, 101]
 
 
 async def test_session_lock_shared_with_buttons(
@@ -235,9 +313,9 @@ async def test_video_unsupported(
     assert ir.async_get(hass).async_get_issue(DOMAIN, "video_unsupported")
 
 
-async def _offer(ws: Any) -> int:
+async def _offer(ws: Any, entity_id: str = CAMERA) -> int:
     await ws.send_json_auto_id(
-        {"type": "camera/webrtc/offer", "entity_id": CAMERA, "offer": "v=0 offer"}
+        {"type": "camera/webrtc/offer", "entity_id": entity_id, "offer": "v=0 offer"}
     )
     result = await ws.receive_json()
     assert result["success"], result
@@ -429,10 +507,9 @@ async def test_webrtc_start_failure(
     client_holder: ClientHolder,
     hass_ws_client: Any,
 ) -> None:
-    """If no station can be monitored, the viewer gets an error."""
+    """If the station cannot be monitored, the viewer gets an error."""
     client = _client(client_holder)
-    for terminal in (101, 102):
-        client.live_errors[terminal] = StationBusyError("busy", mid="24021", rslt=486)
+    client.live_errors[101] = StationBusyError("busy", mid="24021", rslt=486)
     ws = await hass_ws_client(hass)
     await _offer(ws)
     session, error = await _events(ws, 2)
@@ -440,6 +517,54 @@ async def test_webrtc_start_failure(
     assert error["type"] == "error"
     assert error["code"] == "live_failed"
     assert not camera_entry.runtime_data.media.live
+
+
+async def test_live_view_of_another_station(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    go2rtc: FakeGo2Rtc,
+    hass_ws_client: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One station at a time: a live view keeps the other cameras on hold."""
+    monkeypatch.setattr("custom_components.aiphone_jo.media.VIEWER_GRACE", 5)
+    client = _client(client_holder)
+    media = camera_entry.runtime_data.media
+    assert await _image(hass, BACK_CAMERA) == JPEG
+    _age_cache(camera_entry, 31, 102)
+
+    front_ws = await hass_ws_client(hass)
+    front = await _offer(front_ws)
+    await _events(front_ws, 3)
+    assert [live.terminal for live in client.lives] == [102, 101]
+    assert hass.states.get(CAMERA).state == "streaming"
+    assert hass.states.get(BACK_CAMERA).state != "streaming"
+
+    # The other camera keeps its last image and cannot start a live view.
+    assert await _image(hass, BACK_CAMERA) == JPEG
+    back_ws = await hass_ws_client(hass)
+    await _offer(back_ws, BACK_CAMERA)
+    session, error = await _events(back_ws, 2)
+    assert session["type"] == "session"
+    assert error == {"type": "error", "code": "camera_busy", "message": CAMERA_BUSY}
+    assert len(client.lives) == 2
+    assert media.live_on(101)
+
+    # Once the live view is closed, the other station takes the session over
+    # without waiting for the grace period.
+    await front_ws.send_json_auto_id(
+        {"type": "unsubscribe_events", "subscription": front}
+    )
+    await front_ws.receive_json()
+    await until(lambda: go2rtc.viewers_open == 0)
+    assert media.live_on(101)
+    await _offer(back_ws, BACK_CAMERA)
+    await _events(back_ws, 3)
+    assert client.lives[1].exited.is_set()
+    assert client.lives[2].terminal == 102
+    assert media.live_on(102)
+    assert hass.states.get(BACK_CAMERA).state == "streaming"
 
 
 async def test_unload_stops_live_view(

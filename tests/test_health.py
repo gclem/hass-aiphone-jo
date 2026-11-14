@@ -48,6 +48,7 @@ CLOUD = "binary_sensor.aiphone_jo_1mdw_cloud_connection"
 PROBLEM = "event.aiphone_jo_1mdw_problem"
 ACTION_1 = "button.aiphone_jo_1mdw_action_1"
 CAMERA = "camera.aiphone_jo_1mdw_camera"
+BACK_CAMERA = "camera.aiphone_jo_1mdw_back_camera"
 IMAGE = "image.aiphone_jo_1mdw_last_visitor"
 
 
@@ -321,12 +322,17 @@ async def test_image_avoids_the_ringing_station(
     config_entry: MockConfigEntry,
     client_holder: ClientHolder,
 ) -> None:
-    """While a station rings, images monitor another station only."""
+    """While a station rings, its camera keeps the last image; the others work."""
     await _setup(hass, config_entry)
     client = _client(client_holder)
+    media = config_entry.runtime_data.media
+    assert (await async_get_image(hass, CAMERA)).content == JPEG
+    image, at = media._images[101]
+    media._images[101] = (image, at - 3600)  # Stale: refreshed without the ring.
     await _ring(hass, client)  # Front (101) rings.
     assert (await async_get_image(hass, CAMERA)).content == JPEG
-    assert [live.terminal for live in client.lives] == [102]
+    assert (await async_get_image(hass, BACK_CAMERA)).content == JPEG
+    assert [live.terminal for live in client.lives] == [101, 102]
 
 
 async def test_single_station_ringing_keeps_last_image(
@@ -344,13 +350,16 @@ async def test_single_station_ringing_keeps_last_image(
     client_holder.setup = single
     await _setup(hass, config_entry)
     client = _client(client_holder)
-    media = config_entry.runtime_data.media
-    assert await media.async_image() == JPEG
+    runtime = config_entry.runtime_data
+    media = runtime.media
+    [front] = runtime.camera_stations
+    assert hass.states.get(BACK_CAMERA) is None
+    assert await media.async_image(front) == JPEG
     assert len(client.lives) == 1
-    media._image_at = None  # Stale: would be refreshed without the ring.
+    media._images[101] = (JPEG, 0.0)  # Stale: would be refreshed without the ring.
 
     call = await _ring(hass, client)
-    assert await media.async_image() == JPEG
+    assert await media.async_image(front) == JPEG
     assert len(client.lives) == 1
 
     ws = await hass_ws_client(hass)
@@ -367,7 +376,7 @@ async def test_single_station_ringing_keeps_last_image(
     call.status = CallStatus.CANCELLED
     client.emit(CallUpdatedEvent(call))
     await hass.async_block_till_done()
-    assert await media.async_image() == JPEG
+    assert await media.async_image(front) == JPEG
     assert len(client.lives) == 2
 
 
@@ -383,7 +392,6 @@ async def test_buttons_use_the_ringing_station_last(
     client.open_door.assert_awaited_once_with(Output.UNLOCK, 102, 5)
     runtime = loaded_entry.runtime_data
     assert [station.id for station in runtime.session_stations()] == [102, 101]
-    assert [station.id for station in runtime.session_stations(media=True)] == [102]
 
 
 # ------------------------------------------------------------- call buttons

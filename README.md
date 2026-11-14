@@ -31,8 +31,8 @@ The integration ships with its own copy of the library.
 - **Ring** detection (call button pressed on an entrance station).
 - **Action 1** and **Action 2** buttons, which trigger the monitor's two
   outputs.
-- **Camera**: still image of an entrance station, refreshed while it is
-  displayed, and a WebRTC live view with sound, through go2rtc.
+- **Cameras**: one per entrance station, with a still image refreshed while
+  it is displayed and a WebRTC live view with sound, through go2rtc.
 
 See the [roadmap](ROADMAP.md) for upcoming features.
 
@@ -47,7 +47,8 @@ All entities belong to one device, the monitor.
 | `sensor` | Last ringing station | Name of the station that rang last (kept across restarts), with `rang_at` and `raw_name`. |
 | `button` | Action 1 | Pulses output 1 of the monitor (unlock output). |
 | `button` | Action 2 | Pulses output 2 of the monitor (option output). |
-| `camera` | Camera | Image and live view of the entrance station chosen in the options. |
+| `camera` | Camera | Image and live view of the entrance station chosen in the options, with its `station`. |
+| `camera` | *Station* camera | Image and live view of each other entrance station with a camera (for example **Back camera**), with its `station`. |
 | `image` | Last visitor | Image captured at the last ring, with `station` and `ringing_at`, kept across restarts (only with the snapshot on ring option). |
 | `binary_sensor` | Cloud connection | Diagnostic: connection to the Aiphone cloud, with `connected_since`, `disconnected_since`, `last_error`, `reconnections` and `ring_topic_subscribed`. Always available. |
 | `event` | Problem | Diagnostic: fired on every problem, with its `message` (see [Problems and errors](#problems-and-errors)). Always available. |
@@ -67,14 +68,17 @@ that calls may end the call.
 
 ### Camera
 
-The camera shows the entrance station chosen in the options. It relies on
+Each entrance station with a camera has its own camera entity: **Camera**
+shows the station chosen in the options, and the other stations have a camera
+named after them (for example **Back camera**). With a single entrance
+station, only **Camera** exists. The cameras rely on
 [go2rtc](https://github.com/AlexxIT/go2rtc), which Home Assistant runs itself
 on Home Assistant OS and Container installations (go2rtc integration, part of
 the default configuration). On a Home Assistant Core installation, or to use
 another go2rtc server (1.9.15 or later), enter its URL in the options.
 
-- **Live view** (WebRTC, video and sound): opening the camera starts a
-  monitoring session on the entrance station. The station ends each session
+- **Live view** (WebRTC, video and sound): opening a camera starts a
+  monitoring session on its entrance station. The station ends each session
   after **about 60 seconds**; while the live view is open, a new session is
   opened each time and the live view continues after an interruption of a few
   seconds. Several viewers share the same sessions, which stop a few seconds
@@ -89,9 +93,20 @@ Depending on the installation, this may turn on the monitor screen or the
 station's LED or lighting, and keeps the station busy while it lasts. The
 output buttons keep working during a live view.
 
-The integration creates two streams in go2rtc: `aiphone_jo_<entry id>`, which
-receives the sessions, and `aiphone_jo_<entry id>_live`, which the live view
-reads. The second one re-reads the first through go2rtc's RTSP server and
+The intercom runs **one monitoring session at a time**, so the cameras take
+turns:
+
+- images of several cameras are taken one after the other;
+- while the live view of one station is open (or a call is answered), the
+  other cameras keep their last image, and opening their live view shows an
+  explanation instead. Close the live view first; a camera kept open for a
+  returning viewer (a few seconds) gives way immediately;
+- a busy station never shows another station's image: its camera keeps the
+  last one.
+
+The integration creates two streams in go2rtc, shared by all the cameras:
+`aiphone_jo_<entry id>`, which receives the sessions, and
+`aiphone_jo_<entry id>_live`, which the live view reads. The second one re-reads the first through go2rtc's RTSP server and
 ffmpeg, without transcoding, so that viewers move to each new session. The
 go2rtc run by Home Assistant provides both. With another go2rtc server:
 
@@ -105,13 +120,14 @@ Without the RTSP server, the live view stops with each session (about
 60 seconds) and can be opened again. Without ffmpeg, the live view cannot
 start.
 
-If go2rtc cannot be reached, the camera is unavailable and a repair notice
+If go2rtc cannot be reached, the cameras are unavailable and a repair notice
 explains what to do; the other entities keep working.
 
-While a station rings, the camera never opens a monitoring session on it,
-since that may end the call: images come from another camera station, or the
-last image is kept, and a live view on that station is refused with an
-explanation. Answer the call to see the visitor.
+While a station rings, its camera never opens a monitoring session on it,
+since that may end the call: the last image is kept (or the visitor's image,
+with the snapshot on ring), and its live view is refused with an explanation.
+The cameras of the other stations keep working. Answer the call to see the
+visitor.
 
 ### Snapshot on ring (experimental)
 
@@ -120,7 +136,7 @@ of the visitor from the call itself, without answering it: the integration
 receives the call's video for a few seconds, keeps one image, then leaves the
 call. The call keeps ringing on the monitor and the other phones, and can
 still be answered. The image is shown by the **Last visitor** entity and by
-the camera. If the call is answered from Home Assistant meanwhile, the image
+the camera of the station that rang. If the call is answered from Home Assistant meanwhile, the image
 is taken from the answered call.
 
 Every ring also fires an `aiphone_jo_ring` event, with `station`, `raw_name`,
@@ -163,7 +179,9 @@ no call rings (or, for Hang up, when no call was answered from Home
 Assistant) shows an error that says so.
 | `sensor` | Call | `idle`, `ringing`, `connecting`, `talking`, `ended`, `rejected`, `missed`, `answered_elsewhere` or `failed`, with the `station`, `started_at` and `end_reason` (`answered_elsewhere`, `ended_by_station`, `cancelled_by_station`, `expired`, `rejected` or `ended_by_client`). |
 
-After **Answer**, open the camera: the live view shows the visitor with sound.
+After **Answer**, open the camera of the station that rang: the live view
+shows the visitor with sound. The other cameras keep their last image until
+the call ends.
 A call is hung up automatically after 200 seconds (the limit of the official
 app), and when the integration is reloaded. If another phone answers first,
 the call shows `answered_elsewhere`. The output buttons keep working during a
@@ -291,8 +309,10 @@ Every error message says what to do. The most common cases:
 
 **Configure** lets you choose:
 
-- the entrance station used for the output buttons and the camera (the first
-  camera station by default);
+- the preferred entrance station (the first camera station by default): the
+  output buttons use it first, and the **Camera** entity shows it. Changing it
+  keeps the **Camera** entity (and your dashboards) on the new station; the
+  station previously shown gets its own camera entity;
 - the camera image refresh interval (30 seconds by default, 10 to 3600);
 - the URL of a go2rtc server, with optional credentials, when Home Assistant
   does not run go2rtc itself (Home Assistant Core installations);
@@ -326,7 +346,7 @@ name to delete.
   experimental and have not been validated on real hardware yet. The snapshot
   on ring receives the call's video without answering; if the entrance
   station only sends video to an answered call, no image is captured. No
-  image is captured while the camera live view is open. Output status is not available yet.
+  image is captured while a camera live view is open. Output status is not available yet.
 - The live view is interrupted for a few seconds about every minute, when the
   entrance station's session is renewed. Audio is one-way (from the entrance
   station).
