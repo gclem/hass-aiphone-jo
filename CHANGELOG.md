@@ -2,6 +2,12 @@
 
 All notable changes to this integration.
 
+## 0.4.7
+
+- A camera without any image yet (after a restart) waits up to 15 seconds for
+  the session used by another station, instead of returning no image (HTTP
+  500) while another camera's image or live view is in progress.
+
 ## 0.4.6
 
 - One camera per entrance station (#32): installations with several
