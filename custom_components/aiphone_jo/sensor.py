@@ -16,6 +16,7 @@ from . import AiphoneJoConfigEntry
 from .call import CallState
 from .const import ATTR_RAW_NAME
 from .entity import AiphoneJoEntity, async_remove_disabled
+from .media import CameraActivity
 
 ATTR_RANG_AT = "rang_at"
 
@@ -28,6 +29,8 @@ async def async_setup_entry(
     """Set up the last station sensor and, when enabled, the call state."""
     runtime = entry.runtime_data
     entities: list[SensorEntity] = [AiphoneJoLastStationSensor(runtime, "last_station")]
+    if runtime.camera_stations:
+        entities.append(AiphoneJoCameraActivitySensor(runtime, "camera_activity"))
     if runtime.calls.enabled:
         entities.append(AiphoneJoCallStateSensor(runtime, "call_state"))
     else:
@@ -93,3 +96,30 @@ class AiphoneJoCallStateSensor(AiphoneJoEntity, SensorEntity):
             "started_at": calls.started_at.isoformat() if calls.started_at else None,
             "end_reason": calls.end_reason,
         }
+
+
+class AiphoneJoCameraActivitySensor(AiphoneJoEntity, SensorEntity):
+    """What the cameras' shared monitoring session is doing.
+
+    The intercom runs one monitoring session at a time: this tells why a live
+    view waits or is refused (image being taken, live view or call on another
+    station, station busy).
+    """
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = [activity.value for activity in CameraActivity]  # noqa: RUF012
+
+    @property
+    def native_value(self) -> str:
+        """Current activity."""
+        return self.runtime.media.activity[0].value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Entrance station concerned, if any."""
+        station_id = self.runtime.media.activity[1]
+        station = next(
+            (s for s in self.runtime.camera_stations if s.id == station_id), None
+        )
+        label = self.runtime.station_label(station.name) if station else None
+        return {"station": label}

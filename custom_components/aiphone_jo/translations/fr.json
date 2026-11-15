@@ -298,6 +298,21 @@
             }
           }
         }
+      },
+      "camera_activity": {
+        "name": "Activité caméra",
+        "state": {
+          "idle": "Au repos",
+          "image": "Capture d'image",
+          "live_view": "Vue en direct",
+          "call": "Appel",
+          "busy": "Platine occupée"
+        },
+        "state_attributes": {
+          "station": {
+            "name": "Platine de rue"
+          }
+        }
       }
     }
   },

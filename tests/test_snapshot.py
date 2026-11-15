@@ -24,6 +24,7 @@ from .test_call import ANSWER, CALL, REJECT, _client, _press, _ring
 
 IMAGE = "image.aiphone_jo_1mdw_last_visitor"
 PREVIEW = ["request_offer", "send_answer", "withdraw"]
+CAMERA = "camera.aiphone_jo_1mdw_camera"
 # Never sent by a capture: they would end the call for every phone.
 FORBIDDEN = {"reject", "close", "ready", "reply", "start"}
 
@@ -252,19 +253,46 @@ async def test_live_view_busy(
     config_entry: MockConfigEntry,
     client_holder: ClientHolder,
     ring_events: list[Event],
+    hass_ws_client: Any,
 ) -> None:
     """An open live view keeps its session; the ring has no image."""
     await _setup(hass, config_entry, **{CONF_RING_SNAPSHOT: True})
     client = _client(client_holder)
+    ws = await hass_ws_client(hass)
+    await ws.send_json_auto_id(
+        {"type": "camera/webrtc/offer", "entity_id": CAMERA, "offer": "v=0 offer"}
+    )
+    assert (await ws.receive_json())["success"]
+    for _ in range(3):
+        await ws.receive_json()
+    assert config_entry.runtime_data.media.live_on(101)
+    await _ring(hass, client)
+    await until(lambda: ring_events)
+    assert client.call_sessions == []
+    assert ring_events[0].data["snapshot"] is False
+    assert config_entry.runtime_data.media.live_on(101)
+
+
+async def test_image_session_gives_way_to_the_visitor(
+    hass: HomeAssistant,
+    go2rtc: FakeGo2Rtc,
+    config_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    ring_events: list[Event],
+) -> None:
+    """A session open for camera images is left for the visitor's image."""
+    await _setup(hass, config_entry, **{CONF_RING_SNAPSHOT: True})
+    client = _client(client_holder)
     media = config_entry.runtime_data.media
-    await media.async_acquire(config_entry.runtime_data.camera_stations[0])
-    try:
-        await _ring(hass, client)
-        await until(lambda: ring_events)
-        assert client.call_sessions == []
-        assert ring_events[0].data["snapshot"] is False
-    finally:
-        await media.async_release()
+    await media.async_acquire(config_entry.runtime_data.camera_stations[1])
+    await media.async_release(grace=60)  # Kept, without viewers.
+    assert media.live_on(102)
+    await _ring(hass, client)
+    await until(lambda: ring_events)
+    assert ring_events[0].data["snapshot"] is True
+    assert client.call_sessions[0].steps == PREVIEW
+    assert client.lives[0].exited.is_set()
+    assert not media.live
 
 
 async def test_answer_right_after_failed_capture(
