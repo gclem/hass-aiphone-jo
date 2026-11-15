@@ -2,6 +2,11 @@
 
 All notable changes to this integration.
 
+## 0.4.13
+
+- The integration has its own icon and logo in Home Assistant (Home Assistant
+  2026.3 or later), instead of "icon not available".
+
 ## 0.4.12
 
 - A station that refused a session or did not answer could stay busy for a
