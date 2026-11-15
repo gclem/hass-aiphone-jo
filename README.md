@@ -11,6 +11,12 @@ rings, the monitor's two outputs (door, gate...), and a camera for each
 entrance station with a live view. As options, it adds a picture of each
 visitor and call answering.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/gclem/hass-aiphone-jo/main/docs/images/device.png"
+       alt="The monitor's device page in Home Assistant: Action 1 and Action 2 buttons, one camera per entrance station, ring sensors and events, cloud connection and activity"
+       width="640">
+</p>
+
 ## Status
 
 - **Version 0.4**, approaching 1.0, used every day on real JO-1MDW
