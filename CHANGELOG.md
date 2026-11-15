@@ -2,6 +2,13 @@
 
 All notable changes to this integration.
 
+## Unreleased
+
+- The README is shorter: what the integration does, its status, features,
+  requirements and installation. The details moved to guides in `docs/`
+  (configuration, entities, cameras, rings and calls, problems). The roadmap
+  is removed.
+
 ## 0.4.11
 
 - A camera no longer shows another station's video (#45). The video of an
