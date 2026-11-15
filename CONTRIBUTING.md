@@ -1,7 +1,8 @@
 # Contributing
 
-Bug reports, feature requests and pull requests are welcome. Upcoming features
-are listed in the [roadmap](ROADMAP.md).
+Bug reports, feature requests and pull requests are welcome. The user
+documentation is in the [README](README.md) and the [docs](docs) folder: keep
+it up to date with your changes.
 
 ## Reporting a bug
 
