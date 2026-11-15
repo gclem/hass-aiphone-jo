@@ -11,6 +11,25 @@ rings, the monitor's two outputs (door, gate...), and a camera for each
 entrance station with a live view. As options, it adds a picture of each
 visitor and call answering.
 
+## At a glance
+
+Everything appears on one device, the monitor:
+
+```mermaid
+flowchart LR
+    M["Aiphone JO-1MDW<br/>(device)"]
+    M --> R["<b>Rings</b><br/>Ring · event<br/>Ringing · binary sensor<br/>Last ringing station · sensor"]
+    M --> O["<b>Outputs</b><br/>Action 1 · button<br/>Action 2 · button"]
+    M --> C["<b>Cameras</b><br/>Camera · camera<br/>one camera per other station"]
+    M --> D["<b>Diagnostics</b><br/>Cloud connection · binary sensor<br/>Problem · event"]
+    M -.-> S["<b>Snapshot on ring</b> (option)<br/>Last visitor · image"]
+    M -.-> A["<b>Call answering</b> (option)<br/>Answer · Hang up · Reject · buttons<br/>Call · sensor"]
+    R --> RE(["aiphone_jo_ring event"])
+    D --> EE(["aiphone_jo_error event"])
+```
+
+Each entity is described in [Entities](docs/entities.md).
+
 ## Status
 
 - **Version 0.4**, approaching 1.0, used every day on real JO-1MDW
