@@ -282,7 +282,9 @@ class CameraMedia:
         async with self._runtime.session_lock:
             # The station may have started ringing while waiting for the lock.
             self._check_not_ringing(station)
-            await bridge.async_ensure_stream()
+            # Never the video of the previous session, possibly of another
+            # station, as the image or the start of this one's live view.
+            await bridge.async_reset_stream()
             if renew:
                 await bridge.async_ensure_relay()
             live = client.live_monitor(bridge.async_ingest, station.id, renew=renew)

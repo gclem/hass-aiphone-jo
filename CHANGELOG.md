@@ -2,6 +2,14 @@
 
 All notable changes to this integration.
 
+## 0.4.11
+
+- A camera no longer shows another station's video (#45). The video of an
+  ended session stays in go2rtc for a few seconds, longer than the next
+  session takes to start, so an image or the start of a live view could
+  come from the previous station. The stream is now emptied before each
+  session.
+
 ## 0.4.10
 
 - Opening a live view interrupts the image being taken of another station,
