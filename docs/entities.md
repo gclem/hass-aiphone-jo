@@ -13,6 +13,7 @@ All the entities belong to one device, the monitor.
 | `button` | Action 2 | Pulses output 2 of the monitor (option output). |
 | `camera` | Camera | Image and live view of the entrance station chosen in the options, with its `station`. |
 | `camera` | *Station* camera | Image and live view of each other entrance station with a camera (for example **Back camera**), with its `station`. |
+| `sensor` | Camera activity | What the cameras' shared monitoring session is doing: `idle`, `image` (taking an image), `live_view`, `call` or `busy` (the station refused or did not answer), with the `station` concerned. See [Cameras](cameras.md#one-session-at-a-time). |
 | `image` | Last visitor | Image captured at the last ring, with `station` and `ringing_at`. Kept across restarts. Only with the snapshot on ring option. |
 | `binary_sensor` | Cloud connection | Diagnostic: connection to the Aiphone cloud. Attributes: `connected_since`, `disconnected_since`, `last_error`, `reconnections` and `ring_topic_subscribed`. |
 | `event` | Problem | Diagnostic: fired on every problem, with its `message` (see [Problems and errors](problems.md)). |

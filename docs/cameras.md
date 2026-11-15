@@ -41,19 +41,46 @@ turns:
 
 - **Images** of several cameras are taken one after the other.
 - **A live view goes first**:
-  - it interrupts the image being taken of another station, and that camera
-    keeps its last image;
-  - it joins the session of an image of its own station.
+  - it joins the session of an image of its own station;
+  - an image of another station that has not started is skipped, and that
+    camera keeps its last image;
+  - an image whose station is answering the request (2 to 4 seconds) is
+    never interrupted: the session is closed as soon as the station answers,
+    without the image. Interrupting it could leave a session open on the
+    station, which would then refuse every new one.
 - **While the live view of one station is open**, or a call is answered:
   - the other cameras keep their last image;
   - opening their live view shows an explanation instead, so close the live
     view first;
   - a camera kept open for a returning viewer (a few seconds) gives way
     immediately.
+- **The output buttons** use the open session, if any, without opening a new
+  one.
 - **A camera always shows its own station**: when its station is busy, it
   keeps its last image.
 
+The **Camera activity** sensor tells what the session is doing, and for which
+station: taking an image, live view, call, station busy, or idle. Show it next
+to the cameras on a dashboard: a live view that takes a few seconds to start
+then has a visible reason.
+
+## When a station is busy
+
+A station may refuse a session (busy) or not answer in time, for example
+while the Aiphone app or the indoor monitor uses it, or while a session is
+still closing.
+
+- **Live view:** the integration asks again a few times over about ten
+  seconds, then shows why it could not start ("The entrance station is busy…"
+  or "did not answer in time").
+- **Images:** the camera keeps its last image and does not ask that station
+  again for 30 seconds, so that it does not keep it busy. The Camera activity
+  sensor shows `busy` meanwhile.
+
 ## While a station rings
+
+Rings are always received, even while a session is open or starting: they do
+not go through the monitoring session.
 
 A camera never opens a monitoring session on a station that rings, since that
 may end the call:

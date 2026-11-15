@@ -56,7 +56,8 @@ answering it:
   station that rang, and kept across restarts.
 
 If the call is answered from Home Assistant meanwhile, the image is taken from
-the answered call. No image is captured while a camera live view is open. If
+the answered call. A session open for camera images gives way to the
+visitor's image; only an open camera live view prevents it. If
 the entrance station only sends video to an answered call, no image can be
 captured.
 

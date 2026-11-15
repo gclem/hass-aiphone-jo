@@ -4,6 +4,19 @@ All notable changes to this integration.
 
 ## Unreleased
 
+- A station that refused a session or did not answer could stay busy for a
+  long time (over 20 minutes on real hardware): its end of session was not
+  answered when the integration had given the session up (library 0.4.5).
+  An image whose station is answering the request is no longer interrupted
+  by a live view: its session is closed as soon as the station answers.
+- After a refusal or no answer, a camera does not ask that station again for
+  30 seconds, instead of at every image.
+- A live view retries a busy station for about ten seconds, then says why it
+  could not start ("The entrance station is busy…", "did not answer in
+  time") instead of `StationBusyError`.
+- New **Camera activity** sensor: idle, taking an image, live view, call or
+  station busy, with the station concerned.
+- A session open for camera images gives way to the visitor's image on ring.
 - The README is shorter: what the integration does, its status, features,
   requirements and installation. The details moved to guides in `docs/`
   (configuration, entities, cameras, rings and calls, problems). The roadmap

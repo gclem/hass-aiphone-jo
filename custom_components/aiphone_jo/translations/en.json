@@ -298,6 +298,21 @@
             }
           }
         }
+      },
+      "camera_activity": {
+        "name": "Camera activity",
+        "state": {
+          "idle": "Idle",
+          "image": "Taking an image",
+          "live_view": "Live view",
+          "call": "Call",
+          "busy": "Station busy"
+        },
+        "state_attributes": {
+          "station": {
+            "name": "Entrance station"
+          }
+        }
       }
     }
   },

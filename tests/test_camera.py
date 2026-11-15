@@ -19,7 +19,13 @@ from homeassistant.helpers import issue_registry as ir
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.aiphone_jo.const import CONF_IMAGE_REFRESH, CONF_STATION, DOMAIN
-from custom_components.aiphone_jo.media import CAMERA_BUSY, LIVE_ENDED, LIVE_STOPPED
+from custom_components.aiphone_jo.media import (
+    CAMERA_BUSY,
+    LIVE_ENDED,
+    LIVE_STOPPED,
+    STATION_BUSY,
+    CameraActivity,
+)
 from custom_components.aiphone_jo.vendor.aiphone_jo import (
     AiphoneJoError,
     Output,
@@ -41,6 +47,7 @@ def fast_polling(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("custom_components.aiphone_jo.media.SESSION_POLL", 0.02)
     monkeypatch.setattr("custom_components.aiphone_jo.media.VIDEO_TIMEOUT", 0.5)
     monkeypatch.setattr("custom_components.aiphone_jo.media.VIEWER_GRACE", 0.05)
+    monkeypatch.setattr("custom_components.aiphone_jo.media.LIVE_BUSY_DELAY", 0.01)
 
 
 @pytest.fixture
@@ -539,16 +546,38 @@ async def test_webrtc_start_failure(
     client_holder: ClientHolder,
     hass_ws_client: Any,
 ) -> None:
-    """If the station cannot be monitored, the viewer gets an error."""
+    """A station still busy after the retries gives a clear error."""
     client = _client(client_holder)
     client.live_errors[101] = StationBusyError("busy", mid="24021", rslt=486)
     ws = await hass_ws_client(hass)
     await _offer(ws)
     session, error = await _events(ws, 2)
     assert session["type"] == "session"
-    assert error["type"] == "error"
-    assert error["code"] == "live_failed"
-    assert not camera_entry.runtime_data.media.live
+    assert error == {"type": "error", "code": "station_busy", "message": STATION_BUSY}
+    assert len(client.lives) == 4  # First attempt and three retries.
+    media = camera_entry.runtime_data.media
+    assert not media.live
+    assert media.activity == (CameraActivity.BUSY, 101)
+
+
+async def test_live_view_waits_for_a_busy_station(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    hass_ws_client: Any,
+) -> None:
+    """A station busy for a moment (a session closing) is asked again."""
+    client = _client(client_holder)
+    client.live_errors[101] = StationBusyError("busy", mid="24021", rslt=486)
+    ws = await hass_ws_client(hass)
+    await _offer(ws)
+    await until(lambda: len(client.lives) >= 1)
+    del client.live_errors[101]
+    _session, answer, _candidate = await _events(ws, 3)
+    assert answer["type"] == "answer"
+    media = camera_entry.runtime_data.media
+    assert media.live_on(101)
+    assert media.activity == (CameraActivity.LIVE_VIEW, 101)
 
 
 async def test_live_view_of_another_station(
@@ -621,15 +650,20 @@ async def test_live_view_goes_before_queued_images(
     await asyncio.sleep(0.05)
     ws = await hass_ws_client(hass)
     await _offer(ws, BACK_CAMERA)
-    # The front session, still starting, was left for the live view.
-    await until(lambda: client.lives[2].cancelled)
-    assert client.lives[2].answer is None
+    # The front session waits for the station's answer: never interrupted
+    # then, since a session the station starts anyway would keep it busy.
+    await asyncio.sleep(0.05)
+    assert not client.lives[2].cancelled
+    frames = len(go2rtc.frames)
     client.gate.set()
     session, answer, _candidate = await _events(ws, 3)
     assert session["type"] == "session"
     assert answer["type"] == "answer"
-    # The queued back image opened no session of its own.
+    # It then left at once, without its image, and the queued back image
+    # opened no session of its own.
+    assert client.lives[2].exited.is_set()
     assert [live.terminal for live in client.lives] == [101, 102, 101, 102]
+    assert len(go2rtc.frames) == frames
     assert media.live_on(102)
     # The front camera keeps its last image.
     assert media.cached_image(101) == JPEG
@@ -642,19 +676,76 @@ async def test_waiting_image_left_for_a_live_view(
     go2rtc: FakeGo2Rtc,
     hass_ws_client: Any,
 ) -> None:
-    """A first image interrupted by a live view returns no image, cleanly."""
+    """A first image left for a live view returns no image, cleanly."""
     client = _client(client_holder)
     client.gate = asyncio.Event()
     image = hass.async_create_task(_image(hass))
     await until(lambda: len(client.lives) == 1)
     ws = await hass_ws_client(hass)
     await _offer(ws, BACK_CAMERA)
+    await asyncio.sleep(0.05)
+    client.gate.set()
     with pytest.raises(HomeAssistantError):
         await image
-    assert client.lives[0].cancelled
-    client.gate.set()
+    assert not client.lives[0].cancelled
+    assert client.lives[0].exited.is_set()
     await _events(ws, 3)
     assert camera_entry.runtime_data.media.live_on(102)
+
+
+async def test_camera_activity_sensor(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    hass_ws_client: Any,
+) -> None:
+    """The activity sensor tells what the shared session is doing, and where."""
+    activity = "sensor.aiphone_jo_1mdw_camera_activity"
+    client = _client(client_holder)
+    assert hass.states.get(activity).state == "idle"
+    assert hass.states.get(activity).attributes["station"] is None
+    client.gate = asyncio.Event()
+    image = hass.async_create_task(_image(hass, BACK_CAMERA))
+    await until(lambda: hass.states.get(activity).state == "image")
+    assert hass.states.get(activity).attributes["station"] == "Back"
+    client.gate.set()
+    await image
+    await until(lambda: hass.states.get(activity).state == "idle")
+    ws = await hass_ws_client(hass)
+    await _offer(ws)
+    await _events(ws, 3)
+    await until(lambda: hass.states.get(activity).state == "live_view")
+    assert hass.states.get(activity).attributes["station"] == "Front"
+
+
+async def test_refused_station_rests(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+) -> None:
+    """After a refusal, a camera does not ask its station again at once."""
+    client = _client(client_holder)
+    media = camera_entry.runtime_data.media
+    assert await _image(hass) == JPEG
+    _age_cache(camera_entry, 31)
+    client.live_errors[101] = StationBusyError("busy", mid="24021", rslt=486)
+    assert await _image(hass) == JPEG
+    await _settle(hass)
+    assert len(client.lives) == 2
+    assert media.activity == (CameraActivity.BUSY, 101)
+    # Every image during the delay keeps the last one, without a session.
+    for _ in range(3):
+        assert await _image(hass) == JPEG
+        await _settle(hass)
+    assert len(client.lives) == 2
+    # After the delay, the station is asked again.
+    del client.live_errors[101]
+    media._refused[101] -= 31
+    assert await _image(hass) == JPEG
+    await _settle(hass)
+    assert len(client.lives) == 3
+    assert media.activity == (CameraActivity.IDLE, None)
+    assert hass.states.get("sensor.aiphone_jo_1mdw_camera_activity").state == "idle"
 
 
 async def test_live_view_joins_the_image_session(

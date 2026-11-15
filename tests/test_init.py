@@ -592,8 +592,8 @@ async def test_migration_to_monitor_id(
     assert migrated.unique_id == f"{monitor_id}_ring"
     assert devices.async_get(device.id).identifiers == {(DOMAIN, monitor_id)}
     assert hass.states.get(ring.entity_id) is not None
-    # One camera per entrance station.
-    assert len(er.async_entries_for_config_entry(entities, entry.entry_id)) == 9
+    # One camera per entrance station, and the camera activity sensor.
+    assert len(er.async_entries_for_config_entry(entities, entry.entry_id)) == 10
 
 
 async def test_migration_with_unreadable_credentials(

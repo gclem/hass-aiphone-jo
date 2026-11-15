@@ -54,6 +54,15 @@
           "rejected": "mdi:phone-cancel",
           "failed": "mdi:phone-alert"
         }
+      },
+      "camera_activity": {
+        "default": "mdi:cctv",
+        "state": {
+          "image": "mdi:camera-outline",
+          "live_view": "mdi:video-outline",
+          "call": "mdi:phone-in-talk",
+          "busy": "mdi:timer-sand"
+        }
       }
     },
     "event": {
