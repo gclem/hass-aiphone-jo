@@ -21,7 +21,7 @@ import contextlib
 import importlib
 import logging
 import warnings
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from collections.abc import Awaitable, Callable, Generator
 from dataclasses import dataclass
 from datetime import datetime
@@ -108,6 +108,16 @@ class _Waiter:
     mid: str
     cid: str | None
     future: asyncio.Future[Message]
+
+
+@dataclass(slots=True)
+class _OwnSession:
+    session: MonitorSession
+    abandoned: bool = False
+
+
+# Own monitoring sessions remembered to answer a late 23003 or MNT_REQ reply.
+MAX_OWN_SESSIONS = 32
 
 
 def _rslt(message: Message) -> Any:
@@ -567,6 +577,11 @@ class AiphoneJoClient:
         self._call: IncomingCall | None = None
         self._call_timer: asyncio.TimerHandle | None = None
         self._background: set[asyncio.Task[Any]] = set()
+        # Monitoring sessions opened by this client, by CID, with the last
+        # PCLIID and whether the caller gave up before the station answered.
+        # The station may still start such a session and later close it with
+        # 23003: unanswered, it refuses every new session (486).
+        self._own_sessions: OrderedDict[str, _OwnSession] = OrderedDict()
         self._broadcast_subscribed = False
         self._auth_failed = False
         self.camera_terminal = camera_terminal
@@ -797,6 +812,9 @@ class AiphoneJoClient:
                 continue
             waiter.future.set_result(message)
             break
+        else:
+            if mid == Mid.MONITOR_REP:
+                self._on_late_monitor_reply(message)
         self._emit(MessageEvent(topic, message))
         self._track_call(message, topic)
         if mid == Mid.DISCONNECT_REQ:
@@ -940,6 +958,7 @@ class AiphoneJoClient:
         monitor = build_monitor_request(credentials, term_id, term_kind, cid)
         session = MonitorSession(self, cid, term_id, term_kind)
         self._session = session
+        own = self._remember_session(session)
         reply = await self.request(start, cid=cid)
         if _rslt(reply) not in _RELAY_OK:
             session._mark_ended(SessionEndedBy.CLIENT)
@@ -954,7 +973,9 @@ class AiphoneJoClient:
         except (ResponseTimeoutError, asyncio.CancelledError):
             # The station may have started monitoring anyway: full teardown,
             # otherwise it answers 486 to the next MNT_REQ for about a minute.
-            # This includes a caller giving up (cancelled) while waiting.
+            # This includes a caller giving up (cancelled) while waiting. A
+            # reply arriving later closes the session it started.
+            own.abandoned = True
             await session.close()
             raise
         result = _rslt(reply)
@@ -1065,14 +1086,52 @@ class AiphoneJoClient:
         if self._session_lock.locked():
             self._session_lock.release()
 
+    def _remember_session(self, session: MonitorSession) -> _OwnSession:
+        own = _OwnSession(session)
+        self._own_sessions[session.cid] = own
+        while len(self._own_sessions) > MAX_OWN_SESSIONS:
+            self._own_sessions.popitem(last=False)
+        return own
+
+    def _on_late_monitor_reply(self, message: Message) -> None:
+        """Close a session whose MNT_REQ reply came after the caller gave up."""
+        cid = header(message).get("CID")
+        own = self._own_sessions.get(cid) if isinstance(cid, str) else None
+        if own is None or not own.abandoned or _rslt(message) not in _SIGNAL_OK:
+            return
+        del self._own_sessions[own.session.cid]
+        own.session._update_correlation(message)
+        _LOGGER.info("Closing a monitoring session started after its request was given up")
+        self._spawn(self._close_abandoned(own.session.cid, own.session.cor_cli_id))
+
+    async def _close_abandoned(self, cid: str, cor_cli_id: str) -> None:
+        try:
+            await self.publish(
+                build_relay_request(
+                    RelayCommand.LEAVE_USER, self._credentials, cid=cid, cor_cli_id=cor_cli_id
+                )
+            )
+            await self.publish(build_disconnect_request(self._credentials, cid))
+        except AiphoneJoError as err:
+            _LOGGER.warning("Could not close an abandoned monitoring session: %s", err)
+
     def _on_station_disconnect(self, message: Message) -> None:
         # The station closes monitoring ~60 s after monitor_req with 23003 on the
         # session CID; the expected answer is LEAVE_USER_REQ then DISCNCT_REP
-        # RSLT 200.
+        # RSLT 200. Unanswered, the station refuses every new session (486), so
+        # a session of this client that already ended locally (closed, given
+        # up) is answered too. Other clients' sessions are left alone.
         session = self._session
         cid = header(message).get("CID")
-        if session is None or not session.active or not cid or cid != session.cid:
+        if not isinstance(cid, str) or not cid:
             return
+        if session is None or not session.active or cid != session.cid:
+            own = self._own_sessions.pop(cid, None)
+            if own is not None and not isinstance(own.session, CallSession):
+                _LOGGER.info("Answering the end of an earlier monitoring session")
+                self._spawn(self._answer_station_disconnect(cid, own.session.cor_cli_id))
+            return
+        self._own_sessions.pop(cid, None)
         cor_cli_id = session.cor_cli_id
         self._detach_session(session, SessionEndedBy.STATION)
         if isinstance(session, CallSession):

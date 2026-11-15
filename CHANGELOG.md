@@ -2,7 +2,7 @@
 
 All notable changes to this integration.
 
-## Unreleased
+## 0.4.12
 
 - A station that refused a session or did not answer could stay busy for a
   long time (over 20 minutes on real hardware): its end of session was not
@@ -21,6 +21,7 @@ All notable changes to this integration.
   requirements and installation. The details moved to guides in `docs/`
   (configuration, entities, cameras, rings and calls, problems). The roadmap
   is removed.
+- Update the aiphone-jo library to 0.4.5.
 
 ## 0.4.11
 
