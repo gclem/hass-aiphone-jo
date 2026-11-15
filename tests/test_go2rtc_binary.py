@@ -198,6 +198,38 @@ async def test_next_session_on_same_stream(bridge: Go2RtcBridge) -> None:
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg is not installed")
+async def test_reset_stream_drops_the_previous_session(bridge: Go2RtcBridge) -> None:
+    """Emptying the stream drops a session still pushing; the next one works (#45).
+
+    The relay keeps the station's video flowing for a few seconds after the
+    session ended: the first session keeps pushing while the stream is reset.
+    """
+    assert await bridge.async_relay_supported()
+    await bridge.async_ensure_stream()
+    await bridge.async_ensure_relay()
+    first = await _relay(bridge)
+    second = None
+    try:
+        await bridge.async_wait_video(15)
+        await bridge.async_reset_stream()
+        streams = await bridge._streams()
+        assert streams is not None
+        assert [p.get("url") for p in streams["producers"]] == [PLACEHOLDER_SOURCE]
+        assert not await bridge.async_video_flowing()
+
+        second = await _relay(bridge)
+        await bridge.async_wait_video(15)
+        image = await bridge.async_frame()
+        assert image.startswith(b"\xff\xd8")
+        async with _viewer(bridge, bridge.relay) as received:
+            await _frames_after(received, 0, 30)
+    finally:
+        await first.close()
+        if second is not None:
+            await second.close()
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg is not installed")
 async def test_relay_keeps_viewers_across_sessions(bridge: Go2RtcBridge) -> None:
     """A relay viewer keeps receiving when the next session replaces the first."""
     assert await bridge.async_relay_supported()
