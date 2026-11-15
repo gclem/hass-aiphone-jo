@@ -192,6 +192,26 @@ async def test_station_option_moves_the_camera_entity(
     assert hass.states.get(CAMERA).attributes["station"] == "Back"
 
 
+async def test_image_never_from_the_previous_session(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    go2rtc: FakeGo2Rtc,
+) -> None:
+    """Each camera shows its own station, not the previous station's video (#45).
+
+    go2rtc keeps an ended session's video in the stream for a few seconds, and
+    the next session starts sooner: the stream is emptied before each session.
+    """
+    client = _client(client_holder)
+    go2rtc.frame_per_session = True
+    front = await _image(hass)
+    back = await _image(hass, BACK_CAMERA)
+    assert [live.terminal for live in client.lives] == [101, 102]
+    assert front == b"\xff\xd8session-1\xff\xd9"
+    assert back == b"\xff\xd8session-2\xff\xd9"
+
+
 async def test_images_one_session_at_a_time(
     hass: HomeAssistant,
     go2rtc: FakeGo2Rtc,

@@ -126,6 +126,11 @@ class FakeGo2Rtc:
     frame: bytes = JPEG
     # Responses returned before the real image, as (status, body).
     frame_failures: list[tuple[int, bytes]] = field(default_factory=list)
+    # Like go2rtc: pushed sessions stay in their stream until it is deleted,
+    # and an image comes from the first one. Off: every image is ``frame``.
+    frame_per_session: bool = False
+    sessions: dict[str, list[int]] = field(default_factory=dict)
+    _session_count: int = 0
     video: bool = True
     rtsp: bool = True
     pushed: set[str] = field(default_factory=set)
@@ -197,6 +202,7 @@ class FakeGo2Rtc:
         self.deleted.append(name)
         self.streams.pop(name, None)
         self.pushed.discard(name)
+        self.sessions.pop(name, None)
         return web.Response(status=200)
 
     async def _put_preload(self, request: web.Request) -> web.Response:
@@ -248,6 +254,8 @@ class FakeGo2Rtc:
         if self.ingest_status != 201:
             return web.Response(status=self.ingest_status)
         self.pushed.add(name)
+        self._session_count += 1
+        self.sessions.setdefault(name, []).append(self._session_count)
         return web.Response(
             status=201, text=GO2RTC_ANSWER, content_type="application/sdp"
         )
@@ -259,6 +267,8 @@ class FakeGo2Rtc:
             status, failure = self.frame_failures.pop(0)
             return web.Response(status=status, body=failure)
         body = self.frame if self._live(name) else b""
+        if body and self.frame_per_session and self.sessions.get(name):
+            body = b"\xff\xd8session-%d\xff\xd9" % self.sessions[name][0]
         return web.Response(status=200, body=body, content_type="image/jpeg")
 
     async def _ws(self, request: web.Request) -> web.WebSocketResponse:

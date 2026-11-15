@@ -213,6 +213,17 @@ class Go2RtcBridge:
         """Create the target stream if it does not exist yet."""
         await self._create(self.stream, PLACEHOLDER_SOURCE)
 
+    async def async_reset_stream(self) -> None:
+        """Empty the target stream before a new session.
+
+        The video of an ended session stays in the stream for a few seconds
+        (about 4 on a JO-1MDW), longer than the next session takes to start:
+        an image or a live view of another station could show it.
+        """
+        with contextlib.suppress(Go2RtcError):
+            await self.async_delete_stream(self.stream)
+        await self.async_create_stream(self.stream, PLACEHOLDER_SOURCE)
+
     async def async_relay_supported(self) -> bool:
         """True when go2rtc can relay the stream (its RTSP server is enabled)."""
         info = await self._json(self.server.api("api"))
