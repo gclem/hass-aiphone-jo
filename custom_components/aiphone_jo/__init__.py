@@ -8,10 +8,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.typing import ConfigType
 
 from .api import (
     Station,
@@ -26,6 +28,7 @@ from .health import async_delete_issues, async_entry_device
 from .media import ISSUES
 from .names import async_get_station_namer
 from .notify import async_notify_manual_removal
+from .services import async_setup_services
 from .snapshot import async_remove_store
 from .vendor.aiphone_jo import (
     AiphoneJoClient,
@@ -36,6 +39,8 @@ from .vendor.aiphone_jo import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -51,6 +56,12 @@ type AiphoneJoConfigEntry = ConfigEntry[AiphoneJoRuntime]
 
 def _auth_failed(key: str) -> ConfigEntryAuthFailed:
     return ConfigEntryAuthFailed(translation_domain=DOMAIN, translation_key=key)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the integration's services."""
+    async_setup_services(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: AiphoneJoConfigEntry) -> bool:

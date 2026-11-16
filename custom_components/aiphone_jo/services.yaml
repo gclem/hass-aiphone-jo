@@ -1,0 +1,10 @@
+test_output_without_session:
+  fields:
+    output:
+      required: true
+      default: "1"
+      selector:
+        select:
+          options:
+            - "1"
+            - "2"
