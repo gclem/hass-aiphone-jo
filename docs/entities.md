@@ -13,7 +13,7 @@ All the entities belong to one device, the monitor.
 | `button` | Action 2 | Pulses output 2 of the monitor (option output). |
 | `camera` | Camera | Image and live view of the entrance station chosen in the options, with its `station`. |
 | `camera` | *Station* camera | Image and live view of each other entrance station with a camera (for example **Back camera**), with its `station`. |
-| `sensor` | Camera activity | What the cameras' shared monitoring session is doing: `idle`, `image` (taking an image), `live_view`, `call` or `busy` (the station refused or did not answer), with the `station` concerned. See [Cameras](cameras.md#one-session-at-a-time). |
+| `sensor` | Camera activity | What the shared monitoring session is doing: `idle`, `command` (sending an output command), `image` (taking an image), `live_view`, `call` or `busy` (the station refused or did not answer), with the `station` concerned. See [Cameras](cameras.md#one-session-at-a-time). |
 | `image` | Last visitor | Image captured at the last ring, with `station` and `ringing_at`. Kept across restarts. Only with the snapshot on ring option. |
 | `binary_sensor` | Cloud connection | Diagnostic: connection to the Aiphone cloud. Attributes: `connected_since`, `disconnected_since`, `last_error`, `reconnections` and `ring_topic_subscribed`. |
 | `event` | Problem | Diagnostic: fired on every problem, with its `message` (see [Problems and errors](problems.md)). |
@@ -45,11 +45,19 @@ The buttons send **pulses**: they are not locks or switches, and the intercom
 does not report any state for its outputs.
 
 - **How a press works:** the monitor only accepts output commands during a
-  short monitoring session. The integration opens one on an entrance
-  station, sends the command and closes it immediately. The station may show
-  that session on its screen.
-- **Queued presses:** one session runs at a time, so successive presses are
-  queued.
+  monitoring session.
+  - If a session is open (live view, camera image, previous press), the
+    command goes through it at once, whatever its station.
+  - Otherwise the integration opens one on an entrance station (a few
+    seconds), sends the command, and **keeps the session 40 seconds**. The
+    next presses within that time are immediate: for a gate, open, stop,
+    then close.
+  - The station may show the session on its screen.
+- **Presses do not pile up:** one press being sent and one waiting at most.
+  Pressing more while they are sent shows "A press of this button is already
+  waiting to be sent", instead of queueing monitoring requests that would
+  saturate the station. The Camera activity sensor shows `command` while a
+  press is being sent.
 - **Busy station:** if the station is busy (call or monitoring in progress),
   the other camera stations are tried.
 - **While a station rings:** the buttons use another station first, because

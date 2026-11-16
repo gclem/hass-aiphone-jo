@@ -61,7 +61,8 @@
           "image": "mdi:camera-outline",
           "live_view": "mdi:video-outline",
           "call": "mdi:phone-in-talk",
-          "busy": "mdi:timer-sand"
+          "busy": "mdi:timer-sand",
+          "command": "mdi:gate-arrow-right"
         }
       }
     },

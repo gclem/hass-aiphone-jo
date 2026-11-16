@@ -303,6 +303,7 @@
         "name": "Activité caméra",
         "state": {
           "idle": "Au repos",
+          "command": "Envoi d'une commande",
           "image": "Capture d'image",
           "live_view": "Vue en direct",
           "call": "Appel",
@@ -376,6 +377,9 @@
     },
     "call_failed": {
       "message": "L'appel n'a pas pu être décroché ({code}). Réessayez à la prochaine sonnerie ; si le problème persiste, signalez ce code."
+    },
+    "command_pending": {
+      "message": "Un appui sur ce bouton attend déjà d'être envoyé. Attendez-le avant d'appuyer à nouveau."
     }
   },
   "issues": {

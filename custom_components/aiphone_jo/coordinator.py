@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -15,6 +16,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from .api import Station
 from .call import CallController
 from .const import CONF_STATION, DOMAIN
+from .go2rtc import Go2RtcError
 from .health import PROBLEM_COMMAND_FAILED, Health, describe
 from .media import CameraMedia
 from .names import StationNamer
@@ -81,6 +83,8 @@ class AiphoneJoRuntime:
         self._call: IncomingCall | None = None
         # One monitoring session at a time: outputs, images and live video.
         self.session_lock = asyncio.Lock()
+        # Presses of each output being sent or waiting: one waits at most.
+        self._presses: Counter[Output] = Counter()
         update = signal_update(entry.entry_id)
         self.health = Health(
             hass,
@@ -196,36 +200,71 @@ class AiphoneJoRuntime:
             raise HomeAssistantError(
                 translation_domain=DOMAIN, translation_key="no_station"
             )
+        if self._presses[output] >= 2:
+            # One press being sent and one waiting: more would only pile up
+            # monitoring requests and saturate the station.
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="command_pending"
+            )
+        self._presses[output] += 1
+        try:
+            await self._async_send(output, stations)
+        except StationBusyError as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="station_busy"
+            ) from err
+        except AiphoneJoError as err:
+            raise _command_error(err) from err
+        finally:
+            self._presses[output] -= 1
+
+    async def _async_send(self, output: Output, stations: list[Station]) -> None:
+        first = stations[0]
+
+        async def send() -> None:
+            # Through the open session if any (whatever its station),
+            # else in a short session on the first station.
+            await self.client.open_door(output, first.id, first.kind)
+
+        if self.media.available:
+            try:
+                # The session is kept for the next presses (stop, close...).
+                await self.media.async_command(stations, send)
+                return
+            except Go2RtcError as err:
+                _LOGGER.debug("Command without the camera session: %s", err)
         async with self.session_lock:
+            busy: StationBusyError | None = None
             for station in stations:
                 try:
                     await self.client.open_door(output, station.id, station.kind)
-                except StationBusyError:
+                except StationBusyError as err:
                     _LOGGER.debug("Station %s busy, trying the next one", station.id)
+                    busy = err
                     continue
-                except NotConnectedError as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN, translation_key="not_connected"
-                    ) from err
-                except ResponseTimeoutError as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN, translation_key="command_timeout"
-                    ) from err
-                except CommandRejectedError as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="command_rejected",
-                        translation_placeholders={
-                            "code": f"MID {err.mid}, RSLT {err.rslt}"
-                        },
-                    ) from err
-                except AiphoneJoError as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="command_failed",
-                        translation_placeholders={"code": type(err).__name__},
-                    ) from err
                 return
-        raise HomeAssistantError(
-            translation_domain=DOMAIN, translation_key="station_busy"
+            assert busy is not None
+            raise busy
+
+
+def _command_error(err: AiphoneJoError) -> HomeAssistantError:
+    """Error shown when an output command failed."""
+    if isinstance(err, NotConnectedError):
+        return HomeAssistantError(
+            translation_domain=DOMAIN, translation_key="not_connected"
         )
+    if isinstance(err, ResponseTimeoutError):
+        return HomeAssistantError(
+            translation_domain=DOMAIN, translation_key="command_timeout"
+        )
+    if isinstance(err, CommandRejectedError):
+        return HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="command_rejected",
+            translation_placeholders={"code": f"MID {err.mid}, RSLT {err.rslt}"},
+        )
+    return HomeAssistantError(
+        translation_domain=DOMAIN,
+        translation_key="command_failed",
+        translation_placeholders={"code": type(err).__name__},
+    )

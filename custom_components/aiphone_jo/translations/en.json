@@ -303,6 +303,7 @@
         "name": "Camera activity",
         "state": {
           "idle": "Idle",
+          "command": "Sending a command",
           "image": "Taking an image",
           "live_view": "Live view",
           "call": "Call",
@@ -376,6 +377,9 @@
     },
     "call_failed": {
       "message": "The call could not be answered ({code}). Try again on the next ring; if it persists, report this code."
+    },
+    "command_pending": {
+      "message": "A press of this button is already waiting to be sent. Wait for it before pressing again."
     }
   },
   "issues": {
