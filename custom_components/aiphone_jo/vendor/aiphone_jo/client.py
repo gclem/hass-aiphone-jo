@@ -22,9 +22,9 @@ import importlib
 import logging
 import warnings
 from collections import OrderedDict, defaultdict
-from collections.abc import Awaitable, Callable, Generator
-from dataclasses import dataclass
-from datetime import datetime
+from collections.abc import Awaitable, Callable, Generator, Iterable
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Self
 
@@ -88,6 +88,9 @@ from .models import (
     RingEvent,
     SessionEndedBy,
     SessionEndedEvent,
+    SessionRecord,
+    SessionRecordEvent,
+    SessionStatus,
 )
 from .redact import redact
 from .transport import MqttConnection, MqttConnectOptions, TransportFactory, aiomqtt_connect
@@ -111,16 +114,23 @@ class _Waiter:
     future: asyncio.Future[Message]
 
 
-@dataclass(slots=True)
-class _OwnSession:
-    session: MonitorSession
-    abandoned: bool = False
-    # Closed again because the station was busy afterwards.
-    cleaned: bool = False
+# Monitoring sessions of this client remembered (with their status) to finish
+# those left open on the station, also after a restart (restore_sessions).
+# Ordinary sessions (closed, ended) are frequent: only the last ones are kept.
+# The others (refused, abandoned, cleaned, unfinished) are kept up to
+# RECORD_RETENTION, at most MAX_NOTABLE_RECORDS, unfinished ones last.
+MAX_ROUTINE_RECORDS = 20
+MAX_NOTABLE_RECORDS = 50
+RECORD_RETENTION = timedelta(days=15)
+ROUTINE_STATUSES = frozenset({SessionStatus.CLOSED, SessionStatus.ENDED})
 
 
-# Own monitoring sessions remembered to answer a late 23003 or MNT_REQ reply.
-MAX_OWN_SESSIONS = 32
+def _now() -> datetime:
+    return datetime.now().astimezone()
+
+
+def _steps_text(steps: dict[str, Any]) -> str:
+    return ", ".join(f"{name} {value}" for name, value in steps.items())
 
 
 def _rslt(message: Message) -> Any:
@@ -287,6 +297,10 @@ class RelaySession:
             except AiphoneJoError as err:
                 steps["disconnect"] = f"error: {err}"
             _LOGGER.debug("Session ended by the client: %s", steps)
+            if isinstance(self, MonitorSession):
+                self._client._set_status(
+                    self.cid, SessionStatus.CLOSED, _steps_text(steps), self.cor_cli_id
+                )
         self._release()
         return steps
 
@@ -582,11 +596,12 @@ class AiphoneJoClient:
         self._call: IncomingCall | None = None
         self._call_timer: asyncio.TimerHandle | None = None
         self._background: set[asyncio.Task[Any]] = set()
-        # Monitoring sessions opened by this client, by CID, with the last
-        # PCLIID and whether the caller gave up before the station answered.
-        # The station may still start such a session and later close it with
-        # 23003: unanswered, it refuses every new session (486).
-        self._own_sessions: OrderedDict[str, _OwnSession] = OrderedDict()
+        # Monitoring sessions opened by this client, by CID, with their
+        # status. The station may still hold one this client gave up, and
+        # refuse every new session (486) until it is closed or its 23003 is
+        # answered.
+        self._records: OrderedDict[str, SessionRecord] = OrderedDict()
+        self._cleanup_tried: set[str] = set()
         self._broadcast_subscribed = False
         self._auth_failed = False
         self.camera_terminal = camera_terminal
@@ -684,6 +699,8 @@ class AiphoneJoClient:
         self._reader = asyncio.create_task(self._read_loop(connection), name="aiphone-jo-mqtt")
         _LOGGER.debug("MQTT connected (monitor-wide topic: %s)", self._broadcast_subscribed)
         self._emit(ConnectionStateEvent(True, self._broadcast_subscribed))
+        # Sessions left open by a previous run or a lost connection.
+        self._cleanup_unfinished("connection")
 
     async def _read_loop(self, connection: MqttConnection) -> None:
         error: str | None = None
@@ -704,7 +721,12 @@ class AiphoneJoClient:
             self._spawn(connection.close())
         self._fail_waiters(NotConnectedError(f"MQTT connection lost: {error}"))
         if self._session is not None and self._session.active:
-            self._detach_session(self._session, SessionEndedBy.CONNECTION_LOST)
+            lost = self._session
+            self._detach_session(lost, SessionEndedBy.CONNECTION_LOST)
+            if isinstance(lost, MonitorSession):
+                self._set_status(
+                    lost.cid, SessionStatus.ABANDONED, "connection lost", lost.cor_cli_id
+                )
         _LOGGER.warning("MQTT connection lost: %s", error)
         self._emit(ConnectionStateEvent(False, False, error))
         if self._auto_reconnect and not self._closing and self._reconnect_task is None:
@@ -963,10 +985,11 @@ class AiphoneJoClient:
         monitor = build_monitor_request(credentials, term_id, term_kind, cid)
         session = MonitorSession(self, cid, term_id, term_kind)
         self._session = session
-        own = self._remember_session(session)
+        self._new_record(session)
         reply = await self.request(start, cid=cid)
         if _rslt(reply) not in _RELAY_OK:
             session._mark_ended(SessionEndedBy.CLIENT)
+            self._set_status(cid, SessionStatus.REFUSED, f"STA_RELAY_REQ RSLT {_rslt(reply)}")
             raise CommandRejectedError(
                 f"STA_RELAY_REQ rejected (RSLT={_rslt(reply)}).",
                 mid=Mid.STA_RELAY_REP,
@@ -975,13 +998,16 @@ class AiphoneJoClient:
         session._update_correlation(reply)
         try:
             reply = await self.request(monitor, cid=cid, timeout=self._monitor_reply_timeout)
-        except (ResponseTimeoutError, asyncio.CancelledError):
+        except (ResponseTimeoutError, asyncio.CancelledError) as err:
             # The station may have started monitoring anyway: full teardown,
-            # otherwise it answers 486 to the next MNT_REQ for about a minute.
-            # This includes a caller giving up (cancelled) while waiting. A
-            # reply arriving later closes the session it started.
-            own.abandoned = True
+            # otherwise it answers 486 to the next MNT_REQ. This includes a
+            # caller giving up (cancelled) while waiting. The session stays
+            # recorded as abandoned: a reply arriving later, its 23003, a
+            # busy answer or the next connection closes it.
             await session.close()
+            reason = "no answer" if isinstance(err, ResponseTimeoutError) else "given up"
+            self._set_status(cid, SessionStatus.ABANDONED, f"MNT_REQ {reason}")
+            _LOGGER.info("Monitoring session %s abandoned (MNT_REQ %s)", cid[-20:], reason)
             raise
         result = _rslt(reply)
         if result not in _SIGNAL_OK:
@@ -993,11 +1019,15 @@ class AiphoneJoClient:
                         RelayCommand.LEAVE_USER, credentials, cid=cid, cor_cli_id=session.cor_cli_id
                     )
                 )
+            self._set_status(
+                cid, SessionStatus.REFUSED, f"MNT_REQ RSLT {result}", session.cor_cli_id
+            )
             if result == RSLT_BUSY:
-                self._cleanup_abandoned()
+                self._cleanup_unfinished("busy station")
             error = StationBusyError if result == RSLT_BUSY else CommandRejectedError
             raise error(f"MNT_REQ rejected (RSLT={result}).", mid=Mid.MONITOR_REP, rslt=result)
         session._update_correlation(reply)
+        self._set_status(cid, SessionStatus.ACTIVE, cor_cli_id=session.cor_cli_id)
         return session
 
     async def open_door(
@@ -1093,53 +1123,149 @@ class AiphoneJoClient:
         if self._session_lock.locked():
             self._session_lock.release()
 
-    def _remember_session(self, session: MonitorSession) -> _OwnSession:
-        own = _OwnSession(session)
-        self._own_sessions[session.cid] = own
-        while len(self._own_sessions) > MAX_OWN_SESSIONS:
-            self._own_sessions.popitem(last=False)
-        return own
+    # ------------------------------------------------------- session records
+
+    @property
+    def session_history(self) -> list[SessionRecord]:
+        """Monitoring sessions opened by this client (copies), oldest first."""
+        return [replace(record) for record in self._records.values()]
+
+    def restore_sessions(self, records: Iterable[SessionRecord]) -> None:
+        """Give back the records kept before a restart (see :class:`SessionRecord`).
+
+        A session that was starting or active when the previous client
+        stopped is considered abandoned: the station may still hold it.
+        Unfinished sessions are closed again once connected, or when the
+        station answers busy.
+        """
+        for given in records:
+            if given.cid in self._records:
+                continue
+            record = replace(given)
+            self._records[record.cid] = record
+            if record.status in (SessionStatus.STARTING, SessionStatus.ACTIVE):
+                self._set_status(
+                    record.cid,
+                    SessionStatus.ABANDONED,
+                    f"{record.status.value} when the client stopped",
+                )
+        self._trim_records()
+
+    def _new_record(self, session: MonitorSession) -> None:
+        now = _now()
+        self._records[session.cid] = SessionRecord(
+            cid=session.cid,
+            term_id=session.term_id,
+            term_kind=session.term_kind,
+            status=SessionStatus.STARTING,
+            started_at=now,
+            updated_at=now,
+        )
+        self._trim_records()
+        self._emit(SessionRecordEvent(replace(self._records[session.cid])))
+
+    def _trim_records(self) -> None:
+        """Keep the history bounded: by age, then by count."""
+        oldest = _now() - RECORD_RETENTION
+        current = self._session.cid if self._session is not None else None
+        for cid in [c for c, r in self._records.items() if r.updated_at < oldest and c != current]:
+            del self._records[cid]
+        routine = [c for c, r in self._records.items() if r.status in ROUTINE_STATUSES]
+        for cid in routine[: max(0, len(routine) - MAX_ROUTINE_RECORDS)]:
+            del self._records[cid]
+        notable = [c for c, r in self._records.items() if r.status not in ROUTINE_STATUSES]
+        excess = len(notable) - MAX_NOTABLE_RECORDS
+        if excess <= 0:
+            return
+        # Resolved ones (refused, cleaned) go first, then the oldest unfinished.
+        resolved = [c for c in notable if not self._records[c].unfinished and c != current]
+        unfinished = [c for c in notable if self._records[c].unfinished and c != current]
+        for cid in (resolved + unfinished)[:excess]:
+            del self._records[cid]
+
+    def _set_status(
+        self, cid: str, status: SessionStatus, detail: str = "", cor_cli_id: str | None = None
+    ) -> None:
+        record = self._records.get(cid)
+        if record is None:
+            return
+        record.status = status
+        record.detail = detail
+        record.updated_at = _now()
+        if cor_cli_id:
+            record.cor_cli_id = cor_cli_id
+        self._emit(SessionRecordEvent(replace(record)))
+        self._trim_records()
 
     def _on_late_monitor_reply(self, message: Message) -> None:
         """Close a session whose MNT_REQ reply came after the caller gave up."""
-        cid = header(message).get("CID")
-        own = self._own_sessions.get(cid) if isinstance(cid, str) else None
-        if own is None or not own.abandoned or _rslt(message) not in _SIGNAL_OK:
+        head = header(message)
+        cid = head.get("CID")
+        record = self._records.get(cid) if isinstance(cid, str) else None
+        if (
+            record is None
+            or record.status is not SessionStatus.ABANDONED
+            or _rslt(message) not in _SIGNAL_OK
+        ):
             return
-        del self._own_sessions[own.session.cid]
-        own.session._update_correlation(message)
-        _LOGGER.info("Closing a monitoring session started after its request was given up")
-        self._spawn(self._close_abandoned(own.session.cid, own.session.cor_cli_id))
+        cli_id = head.get("CLIID")
+        if isinstance(cli_id, str) and cli_id:
+            record.cor_cli_id = cli_id
+        _LOGGER.info("Monitoring session %s started after it was given up: closing it", record.tag)
+        self._cleanup_tried.add(record.cid)
+        self._spawn(self._close_unfinished(record.cid, "started late"))
 
-    def _cleanup_abandoned(self) -> None:
-        """The station is busy: close again the sessions this client gave up.
+    def _cleanup_unfinished(self, reason: str) -> None:
+        """Close again, once each, the sessions the station may still hold.
 
-        A session whose MNT_REQ was given up may have been started by the
-        station after its teardown was sent (DISCNCT answered 481), and then
-        keep the station busy. Each one is closed again once.
+        A session given up before the station answered may have been started
+        afterwards (its DISCNCT answered 481), and keep the station busy.
         """
+        current = self._session.cid if self._session is not None else None
         stale = [
-            own
-            for own in self._own_sessions.values()
-            if own.abandoned and not own.cleaned and own.session is not self._session
+            record
+            for record in self._records.values()
+            if record.unfinished and record.cid != current and record.cid not in self._cleanup_tried
         ]
         if not stale:
             return
-        _LOGGER.info("Station busy: closing %d monitoring session(s) given up earlier", len(stale))
-        for own in stale:
-            own.cleaned = True
-            self._spawn(self._close_abandoned(own.session.cid, own.session.cor_cli_id))
+        _LOGGER.info(
+            "Closing %d unfinished monitoring session(s) (%s): %s",
+            len(stale),
+            reason,
+            ", ".join(record.tag for record in stale),
+        )
+        for record in stale:
+            self._cleanup_tried.add(record.cid)
+            self._spawn(self._close_unfinished(record.cid, reason))
 
-    async def _close_abandoned(self, cid: str, cor_cli_id: str) -> None:
+    async def _close_unfinished(self, cid: str, reason: str) -> None:
+        record = self._records.get(cid)
+        if record is None:
+            return
+        steps: dict[str, Any] = {}
         try:
-            await self.publish(
-                build_relay_request(
-                    RelayCommand.LEAVE_USER, self._credentials, cid=cid, cor_cli_id=cor_cli_id
-                )
+            leave = build_relay_request(
+                RelayCommand.LEAVE_USER, self._credentials, cid=cid, cor_cli_id=record.cor_cli_id
             )
-            await self.publish(build_disconnect_request(self._credentials, cid))
+            steps["leave"] = _rslt(
+                await self.request(leave, cid=cid, timeout=END_SESSION_STEP_TIMEOUT)
+            )
         except AiphoneJoError as err:
-            _LOGGER.warning("Could not close an abandoned monitoring session: %s", err)
+            steps["leave"] = f"error: {err}"
+        try:
+            disconnect = build_disconnect_request(self._credentials, cid)
+            steps["disconnect"] = _rslt(
+                await self.request(disconnect, cid=cid, timeout=END_SESSION_STEP_TIMEOUT)
+            )
+        except AiphoneJoError as err:
+            steps["disconnect"] = f"error: {err}"
+        _LOGGER.info("Monitoring session %s closed again (%s): %s", record.tag, reason, steps)
+        if all(isinstance(value, str) for value in steps.values()):
+            # Nothing reached the station: tried again after a restart.
+            record.detail = f"{reason}: {_steps_text(steps)}"
+            return
+        self._set_status(cid, SessionStatus.CLEANED, f"{reason}: {_steps_text(steps)}")
 
     def _on_station_disconnect(self, message: Message) -> None:
         # The station closes monitoring ~60 s after monitor_req with 23003 on the
@@ -1152,13 +1278,15 @@ class AiphoneJoClient:
         if not isinstance(cid, str) or not cid:
             return
         if session is None or not session.active or cid != session.cid:
-            own = self._own_sessions.pop(cid, None)
-            if own is not None and not isinstance(own.session, CallSession):
-                _LOGGER.info("Answering the end of an earlier monitoring session")
-                self._spawn(self._answer_station_disconnect(cid, own.session.cor_cli_id))
+            record = self._records.get(cid)
+            if record is not None and record.status is not SessionStatus.ENDED:
+                _LOGGER.info("Answering the end of earlier monitoring session %s", record.tag)
+                self._set_status(cid, SessionStatus.ENDED, "ended by the station later")
+                self._spawn(self._answer_station_disconnect(cid, record.cor_cli_id))
             return
-        self._own_sessions.pop(cid, None)
         cor_cli_id = session.cor_cli_id
+        if isinstance(session, MonitorSession):
+            self._set_status(cid, SessionStatus.ENDED, "ended by the station")
         self._detach_session(session, SessionEndedBy.STATION)
         if isinstance(session, CallSession):
             self._end_call(session.call, CallStatus.ENDED, CallEndReason.ENDED_BY_STATION)

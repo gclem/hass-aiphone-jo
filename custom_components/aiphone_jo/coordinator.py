@@ -20,6 +20,7 @@ from .go2rtc import Go2RtcError
 from .health import PROBLEM_COMMAND_FAILED, Health, describe
 from .media import CameraMedia
 from .names import StationNamer
+from .sessions import SessionHistory
 from .snapshot import RingSnapshots
 from .vendor.aiphone_jo import (
     AiphoneEvent,
@@ -102,6 +103,8 @@ class AiphoneJoRuntime:
             hass, self, lambda: async_dispatcher_send(hass, update)
         )
         self._remove_listener = client.add_listener(self._handle_event)
+        # Set by the setup, which records the sessions before connecting.
+        self.sessions: SessionHistory | None = None
 
     @property
     def connected(self) -> bool:
@@ -116,6 +119,8 @@ class AiphoneJoRuntime:
         await self.calls.async_shutdown()
         await self.media.async_shutdown()
         await self.client.disconnect()
+        if self.sessions is not None:
+            await self.sessions.async_flush()
 
     def station_name(self, call: IncomingCall) -> str:
         """Readable name of the station that rang."""

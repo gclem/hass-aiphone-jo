@@ -43,6 +43,22 @@ automation:
           message: "{{ trigger.event.data.message }}"
 ```
 
+## Monitoring sessions left open
+
+The intercom refuses every new monitoring session ("busy") while one is left
+open on the station, for example a session given up because the station did
+not answer in time, or lost with the connection. The integration:
+
+- keeps a history of its monitoring sessions with their status;
+- closes again, once each, the sessions that may still be open: after each
+  connection to the cloud (so also after a restart), and when the station
+  answers busy;
+- stores only the sessions that went wrong and how they ended, privately,
+  so that they can still be closed after a restart. Nothing is written for
+  ordinary sessions. At most 50 are kept, for 15 days at most;
+- shows the recent history in the diagnostics (`sessions`), with the time
+  of each session but not its identifier.
+
 ## Reporting a problem
 
 Open an [issue](https://github.com/gclem/hass-aiphone-jo/issues) and attach:

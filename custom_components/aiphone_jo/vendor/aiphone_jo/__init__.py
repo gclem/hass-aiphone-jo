@@ -79,6 +79,9 @@ from .models import (
     RingEvent,
     SessionEndedBy,
     SessionEndedEvent,
+    SessionRecord,
+    SessionRecordEvent,
+    SessionStatus,
 )
 from .pairing import LocalLink, PairingFlow, PairingStep, PeerCertificate, inspect_peer
 from .redact import redact
@@ -151,6 +154,9 @@ __all__ = [
     "SessionEndedBy",
     "SessionEndedEvent",
     "SessionError",
+    "SessionRecord",
+    "SessionRecordEvent",
+    "SessionStatus",
     "StationBusyError",
     "Talk",
     "Terminal",

@@ -204,6 +204,98 @@ class SessionEndedEvent:
     by: SessionEndedBy
 
 
+class SessionStatus(StrEnum):
+    """Status of a monitoring session opened by this client."""
+
+    STARTING = "starting"
+    """``STA_RELAY_REQ`` / ``MNT_REQ`` sent, no answer yet."""
+    ACTIVE = "active"
+    """Accepted by the station (``24021`` RSLT 200)."""
+    REFUSED = "refused"
+    """Refused (486, 480...): never started on the station."""
+    ABANDONED = "abandoned"
+    """Given up before the station answered (timeout, cancellation), or lost
+    with the connection: the station may still hold it."""
+    CLOSED = "closed"
+    """Closed by this client (``LEAVE_USER_REQ``, ``DISCNCT_REQ``)."""
+    ENDED = "ended"
+    """Ended by the station (``23003``), and answered."""
+    CLEANED = "cleaned"
+    """An unfinished session closed again later (busy station, restart)."""
+
+
+UNFINISHED_SESSION_STATUSES = frozenset(
+    {SessionStatus.STARTING, SessionStatus.ACTIVE, SessionStatus.ABANDONED}
+)
+
+
+@dataclass(slots=True)
+class SessionRecord:
+    """A monitoring session opened by this client, kept to finish it later.
+
+    Store :meth:`to_storage` (it holds the session ``CID``, which contains the
+    client id: keep it private) and give the records back with
+    :meth:`AiphoneJoClient.restore_sessions` after a restart, so that a
+    session left open on the station can still be closed.
+    """
+
+    cid: str = field(repr=False)
+    term_id: int
+    term_kind: int
+    status: SessionStatus
+    started_at: datetime
+    updated_at: datetime
+    cor_cli_id: str = field(default="", repr=False)
+    detail: str = ""
+
+    @property
+    def tag(self) -> str:
+        """Time part of the ``CID``, without the client id: safe to show."""
+        return self.cid[-20:]
+
+    @property
+    def unfinished(self) -> bool:
+        """True when the station may still hold the session."""
+        return self.status in UNFINISHED_SESSION_STATUSES
+
+    def to_storage(self) -> dict[str, Any]:
+        """JSON-serializable form (private: contains the ``CID``)."""
+        return {
+            "cid": self.cid,
+            "term_id": self.term_id,
+            "term_kind": self.term_kind,
+            "status": self.status.value,
+            "started_at": self.started_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+            "cor_cli_id": self.cor_cli_id,
+            "detail": self.detail,
+        }
+
+    @classmethod
+    def from_storage(cls, data: dict[str, Any]) -> SessionRecord | None:
+        """Record from :meth:`to_storage`, or ``None`` when unreadable."""
+        try:
+            return cls(
+                cid=str(data["cid"]),
+                term_id=int(data["term_id"]),
+                term_kind=int(data["term_kind"]),
+                status=SessionStatus(data["status"]),
+                started_at=datetime.fromisoformat(data["started_at"]),
+                updated_at=datetime.fromisoformat(data["updated_at"]),
+                cor_cli_id=str(data.get("cor_cli_id") or ""),
+                detail=str(data.get("detail") or ""),
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+
+
+@dataclass(frozen=True, slots=True)
+class SessionRecordEvent:
+    """A monitoring session of this client changed status (a copy, to store)."""
+
+    record: SessionRecord
+
+
 @dataclass(frozen=True, slots=True)
 class MessageEvent:
     """Any valid frame received over MQTT (raw, unredacted: handle with care)."""
@@ -213,5 +305,10 @@ class MessageEvent:
 
 
 AiphoneEvent = (
-    ConnectionStateEvent | RingEvent | CallUpdatedEvent | SessionEndedEvent | MessageEvent
+    ConnectionStateEvent
+    | RingEvent
+    | CallUpdatedEvent
+    | SessionEndedEvent
+    | SessionRecordEvent
+    | MessageEvent
 )

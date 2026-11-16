@@ -501,6 +501,12 @@ class FakeClient:
         self.call_session_open = False
         self.withdraw_delay = 0.0
         self.live_monitor = self._live_monitor
+        # Session history (library): restored records and the current history.
+        self.restored: list[Any] = []
+        self.session_history: list[Any] = []
+
+    def restore_sessions(self, records: Any) -> None:
+        self.restored = list(records)
 
     def _live_monitor(
         self,

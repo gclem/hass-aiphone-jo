@@ -29,6 +29,7 @@ from .media import ISSUES
 from .names import async_get_station_namer
 from .notify import async_notify_manual_removal
 from .services import async_setup_services
+from .sessions import SessionHistory, async_remove_sessions_store
 from .snapshot import async_remove_store
 from .vendor.aiphone_jo import (
     AiphoneJoClient,
@@ -75,13 +76,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: AiphoneJoConfigEntry) ->
 
     session = async_get_clientsession(hass)
     client = AiphoneJoClient(credentials, session=session, ring_timeout=RING_TIMEOUT)
+    # Sessions left open on the station before a restart are closed once
+    # connected: the history is restored and recorded from the start.
+    sessions = SessionHistory(hass, entry.entry_id)
+    client.restore_sessions(await sessions.async_load())
+    remove_sessions_listener = client.add_listener(sessions.async_handle_event)
+
+    async def _async_abort() -> None:
+        await client.disconnect()
+        remove_sessions_listener()
+        await sessions.async_flush()
+
     try:
         await client.connect()
     except CloudAuthError as err:
-        await client.disconnect()
+        await _async_abort()
         raise _auth_failed("auth_refused") from err
     except AiphoneJoError as err:
-        await client.disconnect()
+        await _async_abort()
         raise ConfigEntryNotReady(
             translation_domain=DOMAIN, translation_key="cloud_unavailable"
         ) from err
@@ -90,7 +102,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AiphoneJoConfigEntry) ->
     try:
         fresh = stations_from_room_info(await client.get_room_info())
     except CloudAuthError as err:
-        await client.disconnect()
+        await _async_abort()
         raise _auth_failed("auth_refused") from err
     except AiphoneJoError as err:
         _LOGGER.debug("Using stored entrance stations: %s", type(err).__name__)
@@ -104,6 +116,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: AiphoneJoConfigEntry) ->
 
     namer = await async_get_station_namer(hass)
     runtime = AiphoneJoRuntime(hass, entry, client, stations, namer)
+    runtime.sessions = sessions
+    entry.async_on_unload(remove_sessions_listener)
     entry.runtime_data = runtime
     runtime.health.async_start()
     await runtime.snapshots.async_load()
@@ -133,6 +147,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         ir.async_delete_issue(hass, DOMAIN, issue)
     async_delete_issues(hass, entry.entry_id)
     await async_remove_store(hass, entry.entry_id)
+    await async_remove_sessions_store(hass, entry.entry_id)
     removed = False
     try:
         credentials = credentials_from_storage(

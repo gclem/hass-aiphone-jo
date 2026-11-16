@@ -9,6 +9,7 @@ from homeassistant.helpers.redact import async_redact_data
 
 from . import AiphoneJoConfigEntry
 from .const import TO_REDACT
+from .sessions import session_diagnostics
 
 
 def _iso(value: Any) -> str | None:
@@ -61,4 +62,6 @@ async def async_get_config_entry_diagnostics(
         }
         diagnostics["health"] = runtime.health.as_diagnostics()
         diagnostics["last_call"] = _last_call(runtime)
+        # Without the session ids (they contain the client id).
+        diagnostics["sessions"] = session_diagnostics(runtime.client.session_history)
     return diagnostics
