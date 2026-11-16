@@ -71,5 +71,10 @@
         "default": "mdi:alert-circle-outline"
       }
     }
+  },
+  "services": {
+    "test_output_without_session": {
+      "service": "mdi:gate-alert"
+    }
   }
 }

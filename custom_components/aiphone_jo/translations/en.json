@@ -380,6 +380,12 @@
     },
     "command_pending": {
       "message": "A press of this button is already waiting to be sent. Wait for it before pressing again."
+    },
+    "session_open": {
+      "message": "A monitoring session is open (live view, image, or a press in the last 40 seconds). Close the live views and try again in a minute."
+    },
+    "not_loaded": {
+      "message": "The Aiphone JO integration is not loaded."
     }
   },
   "issues": {
@@ -398,6 +404,18 @@
     "ring_topic_refused": {
       "title": "{name} may miss rings",
       "description": "The Aiphone cloud refused the subscription to the ring topic of the monitor: rings may not reach Home Assistant, while the buttons and the camera keep working.\n\nReload the integration. If this notice comes back, pair the monitor again (**Reconfigure**), then open an issue with the integration diagnostics if it persists."
+    }
+  },
+  "services": {
+    "test_output_without_session": {
+      "name": "Test an output without a session",
+      "description": "Diagnostic: sends an output command without opening a monitoring session and returns the monitor's reply. It may operate the equipment wired to the output (gate, door).",
+      "fields": {
+        "output": {
+          "name": "Output",
+          "description": "1 (Action 1) or 2 (Action 2)."
+        }
+      }
     }
   }
 }

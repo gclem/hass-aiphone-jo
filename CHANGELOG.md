@@ -2,6 +2,13 @@
 
 All notable changes to this integration.
 
+## 0.4.15
+
+- Diagnostic service `aiphone_jo.test_output_without_session`: sends one
+  output command without a monitoring session and returns the monitor's
+  reply, to check on real hardware whether the session is needed. It may
+  operate the equipment wired to the output.
+
 ## 0.4.14
 
 - Output buttons, for gates in particular: a press opens a monitoring

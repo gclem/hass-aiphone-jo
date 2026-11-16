@@ -380,6 +380,12 @@
     },
     "command_pending": {
       "message": "Un appui sur ce bouton attend déjà d'être envoyé. Attendez-le avant d'appuyer à nouveau."
+    },
+    "session_open": {
+      "message": "Une session de surveillance est ouverte (vue en direct, image, ou appui dans les 40 dernières secondes). Fermez les vues en direct et réessayez dans une minute."
+    },
+    "not_loaded": {
+      "message": "L'intégration Aiphone JO n'est pas chargée."
     }
   },
   "issues": {
@@ -398,6 +404,18 @@
     "ring_topic_refused": {
       "title": "{name} risque de manquer des sonneries",
       "description": "Le cloud Aiphone a refusé l'abonnement au topic de sonnerie du moniteur : les sonneries risquent de ne pas arriver jusqu'à Home Assistant, alors que les boutons et la caméra continuent de fonctionner.\n\nRechargez l'intégration. Si cet avis revient, appairez à nouveau le moniteur (**Reconfigurer**), puis ouvrez une issue avec les diagnostics de l'intégration si le problème persiste."
+    }
+  },
+  "services": {
+    "test_output_without_session": {
+      "name": "Tester une sortie sans session",
+      "description": "Diagnostic : envoie une commande de sortie sans ouvrir de session de surveillance et renvoie la réponse du moniteur. Peut actionner l'équipement branché sur la sortie (portail, porte).",
+      "fields": {
+        "output": {
+          "name": "Sortie",
+          "description": "1 (Action 1) ou 2 (Action 2)."
+        }
+      }
     }
   }
 }
