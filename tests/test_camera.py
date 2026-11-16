@@ -39,6 +39,7 @@ CAMERA = "camera.aiphone_jo_1mdw_camera"
 BACK_CAMERA = "camera.aiphone_jo_1mdw_back_camera"
 FRONT_CAMERA = "camera.aiphone_jo_1mdw_front_camera"
 ACTION_1 = "button.aiphone_jo_1mdw_action_1"
+ACTION_2 = "button.aiphone_jo_1mdw_action_2"
 
 
 @pytest.fixture(autouse=True)
@@ -318,6 +319,98 @@ async def test_session_lock_shared_with_buttons(
     await image
     await press
     client.open_door.assert_awaited_once_with(Output.UNLOCK, 101, 5)
+
+
+async def _press(hass: HomeAssistant, entity_id: str = ACTION_1) -> None:
+    await hass.services.async_call(
+        BUTTON_DOMAIN, SERVICE_PRESS, {ATTR_ENTITY_ID: entity_id}, blocking=True
+    )
+
+
+async def test_gate_presses_share_one_session(
+    hass: HomeAssistant, camera_entry: MockConfigEntry, client_holder: ClientHolder
+) -> None:
+    """Open, stop, close: one monitoring session, the next presses are immediate."""
+    client = _client(client_holder)
+    media = camera_entry.runtime_data.media
+    for _ in range(3):
+        await _press(hass)
+    assert [live.terminal for live in client.lives] == [101]
+    assert client.open_door.await_count == 3
+    # Kept for the next presses, without viewers.
+    assert media.live_on(101)
+    assert not client.lives[0].exited.is_set()
+
+
+async def test_command_session_ends_after_the_hold(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The command session closes once nobody pressed for a while."""
+    monkeypatch.setattr("custom_components.aiphone_jo.media.COMMAND_HOLD", 0.1)
+    client = _client(client_holder)
+    await _press(hass)
+    await until(lambda: client.lives[0].exited.is_set())
+    assert not camera_entry.runtime_data.media.live
+    await _press(hass, ACTION_2)
+    assert len(client.lives) == 2
+
+
+async def test_presses_do_not_pile_up(
+    hass: HomeAssistant, camera_entry: MockConfigEntry, client_holder: ClientHolder
+) -> None:
+    """One press sent and one waiting at most: more are refused, not queued."""
+    client = _client(client_holder)
+    client.gate = asyncio.Event()
+    first = hass.async_create_task(_press(hass))
+    second = hass.async_create_task(_press(hass))
+    await until(lambda: bool(client.lives))
+    with pytest.raises(HomeAssistantError) as err:
+        await _press(hass)
+    assert err.value.translation_key == "command_pending"
+    activity = "sensor.aiphone_jo_1mdw_camera_activity"
+    await until(lambda: hass.states.get(activity).state == "command")
+    client.gate.set()
+    await first
+    await second
+    assert len(client.lives) == 1
+    assert client.open_door.await_count == 2
+    await until(lambda: hass.states.get(activity).state != "command")
+
+
+async def test_command_session_keeps_other_cameras_waiting(
+    hass: HomeAssistant, camera_entry: MockConfigEntry, client_holder: ClientHolder
+) -> None:
+    """During the hold, another station's image keeps its last one."""
+    client = _client(client_holder)
+    assert await _image(hass, BACK_CAMERA) == JPEG
+    _age_cache(camera_entry, 31, 102)
+    await _press(hass)
+    assert [live.terminal for live in client.lives] == [102, 101]
+    assert await _image(hass, BACK_CAMERA) == JPEG
+    await asyncio.sleep(0.1)  # Its refresh, in the background, opens nothing.
+    assert [live.terminal for live in client.lives] == [102, 101]
+    # Its own station's image comes from the kept session.
+    assert await _image(hass) == JPEG
+    assert len(client.lives) == 2
+
+
+async def test_press_goes_through_a_live_view(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    hass_ws_client: Any,
+) -> None:
+    """A live view of any station carries the command, without a new session."""
+    client = _client(client_holder)
+    ws = await hass_ws_client(hass)
+    await _offer(ws, BACK_CAMERA)
+    await _events(ws, 3)
+    await _press(hass)
+    assert [live.terminal for live in client.lives] == [102]
+    client.open_door.assert_awaited_once()
 
 
 async def test_go2rtc_unavailable(

@@ -125,12 +125,17 @@ RETRY_DELAY = 30.0
 # frees it within seconds.
 LIVE_BUSY_RETRIES = 3
 LIVE_BUSY_DELAY = 3.0
+# After an output command, its session is kept this long: the next presses
+# (stop, close a gate...) go through it at once, without a new monitoring
+# request. Camera images of other stations wait meanwhile.
+COMMAND_HOLD = 40.0
 
 
 class CameraActivity(StrEnum):
     """What the shared monitoring session is doing, for the users."""
 
     IDLE = "idle"
+    COMMAND = "command"
     IMAGE = "image"
     LIVE_VIEW = "live_view"
     CALL = "call"
@@ -179,6 +184,9 @@ class CameraMedia:
         # When each station last refused a session or did not answer.
         self._refused: dict[int, float] = {}
         self._refused_timer: Callable[[], None] | None = None
+        # Output commands being sent, and until when their session is kept.
+        self._commands = 0
+        self._command_until = 0.0
         self._refreshes: dict[int, asyncio.Task[bytes | None]] = {}
         self._viewers: dict[str, tuple[Go2RtcViewer, WebRTCSendMessage]] = {}
 
@@ -212,6 +220,8 @@ class CameraMedia:
         """What the session does now, and for which station."""
         if self._call_session is not None:
             return CameraActivity.CALL, self._call_station
+        if self._commands:
+            return CameraActivity.COMMAND, self.session_station
         if self._live is not None:
             kind = CameraActivity.LIVE_VIEW if self._viewers else CameraActivity.IMAGE
             return kind, self._live_station
@@ -305,6 +315,9 @@ class CameraMedia:
         if refused is not None and time.monotonic() - refused < RETRY_DELAY:
             # The station refused a session or did not answer: let it rest.
             return True
+        if self._command_hold():
+            # Kept for the next output commands: other stations wait.
+            return True
         # The session serves the live view of another station, or a call; or
         # a live view is about to start, which goes before any image.
         return (
@@ -322,6 +335,7 @@ class CameraMedia:
             or self._waiting_viewers > 0
             or self._call_session is not None
             or (self.live and self._users > 0)
+            or self._command_hold()
         )
 
     async def _async_wait_first_image(self, station_id: int) -> None:
@@ -347,7 +361,9 @@ class CameraMedia:
         if station.id == self._runtime.ringing_station_id:
             raise StationRingingError("The entrance station is ringing")
 
-    async def _async_start(self, station: Station, viewer: bool = False) -> None:
+    async def _async_start(
+        self, station: Station, viewer: bool = False, wait_video: bool = True
+    ) -> None:
         bridge = self._bridge
         assert bridge is not None
         client: Any = self._runtime.client
@@ -379,6 +395,8 @@ class CameraMedia:
         self._watch = self._runtime.entry.async_create_background_task(
             self._hass, self._async_watch(live, renew), f"{DOMAIN} live session"
         )
+        if not wait_video:
+            return
         try:
             await bridge.async_wait_video(VIDEO_TIMEOUT)
         except Go2RtcError:
@@ -429,7 +447,9 @@ class CameraMedia:
         if self._users == 0:
             await self._async_stop()
 
-    async def async_acquire(self, station: Station, viewer: bool = False) -> None:
+    async def async_acquire(
+        self, station: Station, viewer: bool = False, wait_video: bool = True
+    ) -> None:
         """Use the live session of the station, starting it if needed.
 
         Called with the media lock held. A session kept for a returning viewer
@@ -448,10 +468,63 @@ class CameraMedia:
             await self._async_stop()
         self._users += 1
         try:
-            await self._async_start(station, viewer)
+            await self._async_start(station, viewer, wait_video)
         except BaseException:
             await self.async_release()
             raise
+
+    def _command_hold(self) -> bool:
+        return self._live is not None and time.monotonic() < self._command_until
+
+    async def async_command(
+        self, stations: list[Station], send: Callable[[], Awaitable[None]]
+    ) -> None:
+        """Send an output command through the shared monitoring session.
+
+        An open session (live view, image, previous command) carries it at
+        once: the outputs belong to the monitor, whatever the station. Else a
+        session is opened on the first station that accepts, without waiting
+        for its video. It is then kept ``COMMAND_HOLD`` seconds, so that the
+        next presses (stop, close a gate) are immediate.
+        """
+        self._commands += 1
+        self.async_notify()
+        try:
+            async with self._lock:
+                if self._call_session is not None:
+                    await send()
+                    return
+                if self._live is not None:
+                    await self._async_command_in(send)
+                    return
+                error: AiphoneJoError | None = None
+                for station in stations:
+                    try:
+                        await self.async_acquire(station, wait_video=False)
+                    except (StationBusyError, StationRingingError) as err:
+                        error = err
+                        continue
+                    await self._async_command_in(send, acquired=True)
+                    return
+                assert error is not None
+                raise error
+        finally:
+            self._commands -= 1
+            self.async_notify()
+
+    async def _async_command_in(
+        self, send: Callable[[], Awaitable[None]], acquired: bool = False
+    ) -> None:
+        """Send through the open session, then keep it for the next presses."""
+        if not acquired:
+            self._users += 1
+            self._cancel_stopper()
+        try:
+            await send()
+        finally:
+            self._command_until = time.monotonic() + COMMAND_HOLD
+            self._cancel_stopper()
+            await self.async_release(COMMAND_HOLD)
 
     async def async_release(self, grace: float = 0) -> None:
         """Stop using the live session; it stops with its last user.

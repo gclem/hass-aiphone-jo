@@ -55,7 +55,9 @@ turns:
   - a camera kept open for a returning viewer (a few seconds) gives way
     immediately.
 - **The output buttons** use the open session, if any, without opening a new
-  one.
+  one. A session opened for a press is kept 40 seconds for the next presses;
+  the cameras of other stations keep their last image meanwhile, and a live
+  view takes it over.
 - **A camera always shows its own station**: when its station is busy, it
   keeps its last image.
 

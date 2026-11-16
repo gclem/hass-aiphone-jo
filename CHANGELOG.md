@@ -2,6 +2,17 @@
 
 All notable changes to this integration.
 
+## 0.4.14
+
+- Output buttons, for gates in particular: a press opens a monitoring
+  session and keeps it 40 seconds, so the next presses (stop, then close)
+  go through it at once instead of opening a new session each. Repeated
+  presses saturated the station, which then refused every session (486).
+- Presses no longer pile up: one being sent and one waiting at most; more
+  are refused with a message.
+- A press goes through any open session (live view, camera image) at once.
+- The Camera activity sensor shows `command` while a press is being sent.
+
 ## 0.4.13
 
 - The integration has its own icon and logo in Home Assistant (Home Assistant
