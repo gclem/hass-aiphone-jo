@@ -2,7 +2,7 @@
 
 All notable changes to this integration.
 
-## Unreleased
+## 0.4.17
 
 - The monitoring sessions are recorded with their status (library 0.4.7).
   Those that went wrong (given up, lost with the connection) are stored
@@ -11,6 +11,7 @@ All notable changes to this integration.
   longer keeps it busy until it is unplugged. Only problematic sessions are
   written to disk, at most 50, for 15 days at most. The diagnostics show the
   recent history, without the session identifiers.
+- Update the aiphone-jo library to 0.4.7.
 
 ## 0.4.16
 

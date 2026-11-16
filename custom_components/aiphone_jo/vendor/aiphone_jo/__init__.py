@@ -86,7 +86,7 @@ from .models import (
 from .pairing import LocalLink, PairingFlow, PairingStep, PeerCertificate, inspect_peer
 from .redact import redact
 
-__version__ = "0.4.6"
+__version__ = "0.4.7"
 
 __all__ = [
     "APP_CODE_INCOMPATIBLE",
