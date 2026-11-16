@@ -2,12 +2,13 @@
 
 All notable changes to this integration.
 
-## Unreleased
+## 0.4.16
 
 - A station that refused every session (486) after monitoring requests left
   without an answer recovers better: the integration waits up to 30 seconds
   for the station's answer instead of 13, and on a busy answer it closes
   again the sessions it gave up earlier (library 0.4.6).
+- Update the aiphone-jo library to 0.4.6.
 
 ## 0.4.15
 

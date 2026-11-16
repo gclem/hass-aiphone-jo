@@ -33,6 +33,10 @@ LOCAL_REQUEST_TIMEOUT: Final = 6.0
 TERMINAL_REGISTER_TIMEOUT: Final = 60.0
 MQTT_REPLY_TIMEOUT: Final = 13.0
 END_SESSION_STEP_TIMEOUT: Final = 5.0
+# MNT_REQ waits longer than other requests: a busy monitor may answer late,
+# and a request given up too early may still start a session that nobody
+# closes, which keeps the station busy (486).
+MONITOR_REPLY_TIMEOUT: Final = 30.0
 CALL_RING_TIMEOUT: Final = 60.0
 
 

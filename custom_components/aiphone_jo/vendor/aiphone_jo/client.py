@@ -35,6 +35,7 @@ from .const import (
     CALL_RING_TIMEOUT,
     END_SESSION_STEP_TIMEOUT,
     MAX_FRAME_BYTES,
+    MONITOR_REPLY_TIMEOUT,
     MQTT_REPLY_TIMEOUT,
     RSLT_BUSY,
     TERM_KIND_ENTRANCE_STATION,
@@ -114,6 +115,8 @@ class _Waiter:
 class _OwnSession:
     session: MonitorSession
     abandoned: bool = False
+    # Closed again because the station was busy afterwards.
+    cleaned: bool = False
 
 
 # Own monitoring sessions remembered to answer a late 23003 or MNT_REQ reply.
@@ -552,6 +555,7 @@ class AiphoneJoClient:
         transport_factory: TransportFactory = aiomqtt_connect,
         auto_reconnect: bool = True,
         reply_timeout: float = MQTT_REPLY_TIMEOUT,
+        monitor_reply_timeout: float = MONITOR_REPLY_TIMEOUT,
         ring_timeout: float = CALL_RING_TIMEOUT,
         reconnect_delays: tuple[float, ...] = RECONNECT_DELAYS,
         camera_terminal: Terminal | int | None = None,
@@ -563,6 +567,7 @@ class AiphoneJoClient:
         self._transport_factory = transport_factory
         self._auto_reconnect = auto_reconnect
         self._reply_timeout = reply_timeout
+        self._monitor_reply_timeout = monitor_reply_timeout
         self._ring_timeout = ring_timeout
         self._reconnect_delays = reconnect_delays or RECONNECT_DELAYS
         self._connection: MqttConnection | None = None
@@ -969,7 +974,7 @@ class AiphoneJoClient:
             )
         session._update_correlation(reply)
         try:
-            reply = await self.request(monitor, cid=cid)
+            reply = await self.request(monitor, cid=cid, timeout=self._monitor_reply_timeout)
         except (ResponseTimeoutError, asyncio.CancelledError):
             # The station may have started monitoring anyway: full teardown,
             # otherwise it answers 486 to the next MNT_REQ for about a minute.
@@ -988,6 +993,8 @@ class AiphoneJoClient:
                         RelayCommand.LEAVE_USER, credentials, cid=cid, cor_cli_id=session.cor_cli_id
                     )
                 )
+            if result == RSLT_BUSY:
+                self._cleanup_abandoned()
             error = StationBusyError if result == RSLT_BUSY else CommandRejectedError
             raise error(f"MNT_REQ rejected (RSLT={result}).", mid=Mid.MONITOR_REP, rslt=result)
         session._update_correlation(reply)
@@ -1103,6 +1110,25 @@ class AiphoneJoClient:
         own.session._update_correlation(message)
         _LOGGER.info("Closing a monitoring session started after its request was given up")
         self._spawn(self._close_abandoned(own.session.cid, own.session.cor_cli_id))
+
+    def _cleanup_abandoned(self) -> None:
+        """The station is busy: close again the sessions this client gave up.
+
+        A session whose MNT_REQ was given up may have been started by the
+        station after its teardown was sent (DISCNCT answered 481), and then
+        keep the station busy. Each one is closed again once.
+        """
+        stale = [
+            own
+            for own in self._own_sessions.values()
+            if own.abandoned and not own.cleaned and own.session is not self._session
+        ]
+        if not stale:
+            return
+        _LOGGER.info("Station busy: closing %d monitoring session(s) given up earlier", len(stale))
+        for own in stale:
+            own.cleaned = True
+            self._spawn(self._close_abandoned(own.session.cid, own.session.cor_cli_id))
 
     async def _close_abandoned(self, cid: str, cor_cli_id: str) -> None:
         try:
