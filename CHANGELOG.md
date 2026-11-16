@@ -2,6 +2,16 @@
 
 All notable changes to this integration.
 
+## Unreleased
+
+- The monitoring sessions are recorded with their status (library 0.4.7).
+  Those that went wrong (given up, lost with the connection) are stored
+  privately and closed again after a restart, after each connection and when
+  the station answers busy, so that a session left open on the station no
+  longer keeps it busy until it is unplugged. Only problematic sessions are
+  written to disk, at most 50, for 15 days at most. The diagnostics show the
+  recent history, without the session identifiers.
+
 ## 0.4.16
 
 - A station that refused every session (486) after monitoring requests left
