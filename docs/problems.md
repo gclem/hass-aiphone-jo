@@ -43,6 +43,25 @@ automation:
           message: "{{ trigger.event.data.message }}"
 ```
 
+## No video received
+
+A camera image or live view starts a monitoring session, pushes it into
+go2rtc, then waits 20 seconds for video. When none comes, the `camera_failed`
+problem says how far the session got, for example:
+
+```text
+No video received (pushed session: no track, 0 bytes received; offer audio+video, 2 candidates, answer audio+video, 1 candidates, answered 20.1 s ago)
+```
+
+- **`no pushed session` / `no offer pushed`:** the session never reached
+  go2rtc.
+- **`pushed session: no track`:** go2rtc answered the offer but reports no
+  media: often the network path between go2rtc and the Aiphone relay
+  (firewall, UDP blocked, no usable candidate).
+- **`video 0 packets`:** the video track was set up but stayed empty.
+
+Only media kinds and counts are reported, never addresses.
+
 ## Monitoring sessions left open
 
 The intercom refuses every new monitoring session ("busy") while one is left

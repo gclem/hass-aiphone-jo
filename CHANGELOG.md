@@ -2,6 +2,14 @@
 
 All notable changes to this integration.
 
+## Unreleased
+
+- When a camera session gets no video ("No video received"), the problem
+  message now says how far the session got: whether go2rtc received the
+  pushed session, which tracks reached it and how many packets, and what the
+  offer and answer held (media sections and number of candidates, no
+  address). The diagnostics and the `aiphone_jo_error` event carry it.
+
 ## 0.4.17
 
 - The monitoring sessions are recorded with their status (library 0.4.7).
