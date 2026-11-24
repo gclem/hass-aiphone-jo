@@ -20,6 +20,8 @@ from custom_components.aiphone_jo.go2rtc import (
     Go2RtcBridge,
     Go2RtcError,
     Go2RtcServer,
+    _pushed_summary,
+    _sdp_summary,
     async_check_server,
     async_get_server,
 )
@@ -152,8 +154,79 @@ async def test_wait_video(bridge: Go2RtcBridge, go2rtc: FakeGo2Rtc) -> None:
     await bridge.async_ingest(JANUS_OFFER)
     await bridge.async_wait_video(1)
     go2rtc.video = False
-    with pytest.raises(Go2RtcError):
+    with pytest.raises(Go2RtcError) as err:
         await bridge.async_wait_video(0.3, interval=0.05)
+    # The error says how far the session got, without any address.
+    message = str(err.value)
+    assert message.startswith("No video received (pushed session: no track; ")
+    assert "offer audio+video, 2 candidates, answer " in message
+    assert "198.51.100" not in message
+
+
+async def test_wait_video_without_session(
+    bridge: Go2RtcBridge, go2rtc: FakeGo2Rtc
+) -> None:
+    """Without any offer pushed, the error says so."""
+    await bridge.async_ensure_stream()
+    with pytest.raises(Go2RtcError, match=r"no pushed session; no offer pushed"):
+        await bridge.async_wait_video(0.1, interval=0.05)
+
+
+async def test_reset_forgets_the_pushed_offer(
+    bridge: Go2RtcBridge, go2rtc: FakeGo2Rtc
+) -> None:
+    """The offer of a previous session is not reported for the next one."""
+    await bridge.async_ensure_stream()
+    await bridge.async_ingest(JANUS_OFFER)
+    await bridge.async_reset_stream()
+    assert (await bridge.async_video_report()).endswith("; no offer pushed")
+
+
+@pytest.mark.parametrize(
+    ("info", "expected"),
+    [
+        (None, "stream missing"),
+        ({"producers": [{"url": PLACEHOLDER_SOURCE}]}, "no pushed session"),
+        (
+            {
+                "producers": [
+                    {"url": PLACEHOLDER_SOURCE},
+                    {
+                        "format_name": "webrtc",
+                        "bytes_recv": 0,
+                        "receivers": [],
+                    },
+                ]
+            },
+            "pushed session: no track, 0 bytes received",
+        ),
+        (
+            {
+                "producers": [
+                    {
+                        "format_name": "webrtc",
+                        "receivers": [
+                            {"codec": {"codec_type": "audio"}, "packets": 50},
+                            {"codec": {"codec_type": "video"}},
+                        ],
+                    }
+                ]
+            },
+            "pushed session: audio 50 packets, video 0 packets",
+        ),
+    ],
+)
+def test_pushed_summary(info: dict | None, expected: str) -> None:
+    """The stream state is summarized without addresses."""
+    assert _pushed_summary(info) == expected
+
+
+def test_sdp_summary() -> None:
+    """Media sections, rejected ones and candidates are counted."""
+    assert _sdp_summary(JANUS_OFFER) == "audio+video, 2 candidates"
+    rejected = JANUS_OFFER.replace("m=audio 9 ", "m=audio 0 ")
+    assert _sdp_summary(rejected) == "audio (rejected)+video, 2 candidates"
+    assert _sdp_summary("") == "no media, 0 candidates"
 
 
 async def test_frame(bridge: Go2RtcBridge, go2rtc: FakeGo2Rtc) -> None:

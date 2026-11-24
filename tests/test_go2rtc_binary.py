@@ -174,6 +174,10 @@ async def test_relay_session_through_go2rtc(bridge: Go2RtcBridge) -> None:
     relay = await _relay(bridge)
     try:
         await bridge.async_wait_video(15)
+        # The report reads go2rtc's real stream description.
+        report = await bridge.async_video_report()
+        assert report.startswith("pushed session: "), report
+        assert "video " in report and "offer audio+video" in report, report
         received = await _watch(bridge)
         assert received["video"] > 0
         assert received["audio"] > 0

@@ -16,6 +16,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -56,12 +57,61 @@ FRAME_TIMEOUT = aiohttp.ClientTimeout(total=20)
 # little after the first video packets: a failed image is requested again.
 FRAME_ATTEMPTS = 3
 FRAME_RETRY_DELAY = 0.5
+# Seconds to read the stream state that explains missing video.
+REPORT_TIMEOUT = 5
 # Characters of go2rtc's error response kept in the error message.
 ERROR_DETAIL = 120
 
 
 class Go2RtcError(Exception):
     """go2rtc request failed."""
+
+
+def _sdp_summary(sdp: str) -> str:
+    """Media sections and candidate count of an SDP, without any address."""
+    kinds: list[str] = []
+    candidates = 0
+    for line in sdp.splitlines():
+        if line.startswith("m="):
+            kind, _, rest = line[2:].partition(" ")
+            port = rest.partition(" ")[0]
+            kinds.append(f"{kind} (rejected)" if port == "0" else kind)
+        elif line.startswith("a=candidate:"):
+            candidates += 1
+    return f"{'+'.join(kinds) or 'no media'}, {candidates} candidates"
+
+
+def _pushed_summary(info: dict[str, Any] | None) -> str:
+    """State of the sessions pushed into a stream, for a failed video wait.
+
+    go2rtc lists a pushed session as a producer once its offer is answered,
+    and a receiver for each track once its first packets arrive: a session
+    without receivers never got media through (connectivity, encryption).
+    """
+    if info is None:
+        return "stream missing"
+    pushed = [
+        producer
+        for producer in info.get("producers") or []
+        if isinstance(producer, dict)
+        and (producer.get("format_name") or "receivers" in producer)
+    ]
+    if not pushed:
+        return "no pushed session"
+    parts: list[str] = []
+    for producer in pushed:
+        tracks = [
+            f"{(receiver.get('codec') or {}).get('codec_type') or 'unknown'} "
+            f"{receiver.get('packets') or 0} packets"
+            for receiver in producer.get("receivers") or []
+            if isinstance(receiver, dict)
+        ]
+        received = producer.get("bytes_recv")
+        state = ", ".join(tracks) or "no track"
+        if isinstance(received, int):
+            state += f", {received} bytes received"
+        parts.append(state)
+    return "pushed session: " + "; ".join(parts)
 
 
 def _frame_error(status: int, body: bytes) -> str:
@@ -132,6 +182,9 @@ class Go2RtcBridge:
         self.relay_source = (
             f"ffmpeg:{stream}#video=copy#audio=copy#timeout={RELAY_TIMEOUT}"
         )
+        # Last offer pushed into each stream: what it held, when it was
+        # answered. Reported when no video follows.
+        self._ingests: dict[str, tuple[str, float]] = {}
 
     def _url(self, path: str, **query: str | list[str]) -> str:
         params = "&".join(
@@ -192,6 +245,7 @@ class Go2RtcBridge:
 
     async def async_delete_stream(self, name: str) -> None:
         """Remove a stream."""
+        self._ingests.pop(name, None)
         await self._request("DELETE", self._url("api/streams", src=name))
 
     async def async_preload(self, name: str, *, microphone: str) -> None:
@@ -240,13 +294,35 @@ class Go2RtcBridge:
 
     async def async_ingest(self, offer: str, stream: str | None = None) -> str:
         """Push the relay's offer into the stream; return the answer for the relay."""
+        target = stream or self.stream
         normalized, restore = normalize_mids(offer)
+        self._ingests.pop(target, None)
         status, body = await self._request(
-            "POST", self._url("api/webrtc", dst=stream or self.stream), data=normalized
+            "POST", self._url("api/webrtc", dst=target), data=normalized
         )
         if status not in (200, 201):
             raise Go2RtcError(f"Ingest refused: HTTP {status}")
-        return restore(body.decode())
+        answer = body.decode()
+        summary = f"offer {_sdp_summary(offer)}, answer {_sdp_summary(answer)}"
+        self._ingests[target] = (summary, time.monotonic())
+        _LOGGER.debug("Session pushed into %s: %s", target, summary)
+        return restore(answer)
+
+    async def async_video_report(self, stream: str | None = None) -> str:
+        """Where a pushed session stands, to explain missing video."""
+        target = stream or self.stream
+        ingest = self._ingests.get(target)
+        if ingest is None:
+            pushed = "no offer pushed"
+        else:
+            summary, answered = ingest
+            pushed = f"{summary}, answered {time.monotonic() - answered:.1f} s ago"
+        try:
+            async with asyncio.timeout(REPORT_TIMEOUT):
+                state = _pushed_summary(await self._streams(target))
+        except (Go2RtcError, TimeoutError) as err:
+            state = f"go2rtc unreachable ({type(err).__name__})"
+        return f"{state}; {pushed}"
 
     async def async_video_flowing(self, stream: str | None = None) -> bool:
         """True once go2rtc receives video from a pushed session."""
@@ -269,7 +345,8 @@ class Go2RtcBridge:
                         return
                     await asyncio.sleep(interval)
         except TimeoutError as err:
-            raise Go2RtcError("No video received") from err
+            report = await self.async_video_report(stream)
+            raise Go2RtcError(f"No video received ({report})") from err
 
     async def async_frame(self, stream: str | None = None) -> bytes:
         """Current JPEG image of the stream (the target stream by default)."""
