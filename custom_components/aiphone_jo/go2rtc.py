@@ -18,7 +18,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
 
@@ -61,6 +61,9 @@ FRAME_RETRY_DELAY = 0.5
 REPORT_TIMEOUT = 5
 # Characters of go2rtc's error response kept in the error message.
 ERROR_DETAIL = 120
+# Transports and candidate types go2rtc reports for the path of a session.
+PATH_TRANSPORTS = frozenset({"udp", "tcp"})
+PATH_KINDS = frozenset({"host", "srflx", "prflx", "relay"})
 
 
 class Go2RtcError(Exception):
@@ -81,23 +84,18 @@ def _sdp_summary(sdp: str) -> str:
     return f"{'+'.join(kinds) or 'no media'}, {candidates} candidates"
 
 
-def _pushed_summary(info: dict[str, Any] | None) -> str:
-    """State of the sessions pushed into a stream, for a failed video wait.
-
-    go2rtc lists a pushed session as a producer once its offer is answered,
-    and a receiver for each track once its first packets arrive: a session
-    without receivers never got media through (connectivity, encryption).
-    """
-    if info is None:
-        return "stream missing"
-    pushed = [
+def _pushed_sessions(info: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Sessions pushed into a stream (not its configured sources)."""
+    return [
         producer
-        for producer in info.get("producers") or []
+        for producer in (info or {}).get("producers") or []
         if isinstance(producer, dict)
         and (producer.get("format_name") or "receivers" in producer)
     ]
-    if not pushed:
-        return "no pushed session"
+
+
+def _sessions_state(pushed: list[dict[str, Any]]) -> str:
+    """Tracks and bytes received by the pushed sessions."""
     parts: list[str] = []
     for producer in pushed:
         tracks = [
@@ -111,7 +109,87 @@ def _pushed_summary(info: dict[str, Any] | None) -> str:
         if isinstance(received, int):
             state += f", {received} bytes received"
         parts.append(state)
-    return "pushed session: " + "; ".join(parts)
+    return "; ".join(parts)
+
+
+def _pushed_summary(info: dict[str, Any] | None) -> str:
+    """State of the sessions pushed into a stream, for a failed video wait.
+
+    go2rtc lists a pushed session as a producer once its offer is answered,
+    and a receiver for each track once its first packets arrive: a session
+    without receivers never got media through (connectivity, encryption).
+    """
+    if info is None:
+        return "stream missing"
+    pushed = _pushed_sessions(info)
+    if not pushed:
+        return "no pushed session"
+    return "pushed session: " + _sessions_state(pushed)
+
+
+def _session_path(producer: dict[str, Any]) -> str | None:
+    """Network path a pushed session selected, without any address.
+
+    Once a session found a path to its peer, go2rtc appends the transport to
+    its protocol ("http+udp") and reports the peer's address followed by the
+    type of its candidate: only the transport and that type are kept.
+    """
+    protocol = producer.get("protocol")
+    if not isinstance(protocol, str) or "+" not in protocol:
+        return None
+    transport = protocol.rsplit("+", 1)[1]
+    if transport not in PATH_TRANSPORTS:
+        transport = "unknown"
+    remote = producer.get("remote_addr")
+    words = remote.split() if isinstance(remote, str) else []
+    kind = words[1] if len(words) > 1 and words[1] in PATH_KINDS else None
+    return f"{transport} {kind}" if kind else transport
+
+
+@dataclass
+class _SessionWatch:
+    """What the pushed sessions of a stream did while their video was awaited.
+
+    go2rtc drops a pushed session as soon as its connection ends, with all
+    it knew about it: what was seen meanwhile is kept here. Times are seconds
+    after ``origin`` (when the offer was answered).
+    """
+
+    origin: float = field(default_factory=time.monotonic)
+    first: float | None = None
+    last: float | None = None
+    present: bool = False
+    state: str = ""
+    path: str | None = None
+    path_at: float | None = None
+
+    def note(self, info: dict[str, Any] | None) -> None:
+        """Record the state of the stream at one poll."""
+        pushed = _pushed_sessions(info)
+        self.present = bool(pushed)
+        if not pushed:
+            return
+        now = time.monotonic() - self.origin
+        if self.first is None:
+            self.first = now
+        self.last = now
+        self.state = _sessions_state(pushed)
+        if self.path is None:
+            for producer in pushed:
+                if path := _session_path(producer):
+                    self.path, self.path_at = path, now
+                    break
+
+    def summary(self) -> str:
+        """Timeline of the sessions, without any address."""
+        if self.first is None or self.last is None:
+            return "never seen"
+        seen = f"seen from {self.first:.1f} s"
+        if not self.present:
+            seen += f" to {self.last:.1f} s with {self.state}"
+        if self.path is None:
+            return f"{seen}, no path found"
+        return f"{seen}, path {self.path} by {self.path_at:.1f} s"
 
 
 def _frame_error(status: int, body: bytes) -> str:
@@ -183,8 +261,8 @@ class Go2RtcBridge:
             f"ffmpeg:{stream}#video=copy#audio=copy#timeout={RELAY_TIMEOUT}"
         )
         # Last offer pushed into each stream: what it held, when it was
-        # answered. Reported when no video follows.
-        self._ingests: dict[str, tuple[str, float]] = {}
+        # received and answered. Reported when no video follows.
+        self._ingests: dict[str, tuple[str, float, float]] = {}
 
     def _url(self, path: str, **query: str | list[str]) -> str:
         params = "&".join(
@@ -295,6 +373,7 @@ class Go2RtcBridge:
     async def async_ingest(self, offer: str, stream: str | None = None) -> str:
         """Push the relay's offer into the stream; return the answer for the relay."""
         target = stream or self.stream
+        offered = time.monotonic()
         normalized, restore = normalize_mids(offer)
         self._ingests.pop(target, None)
         status, body = await self._request(
@@ -304,29 +383,40 @@ class Go2RtcBridge:
             raise Go2RtcError(f"Ingest refused: HTTP {status}")
         answer = body.decode()
         summary = f"offer {_sdp_summary(offer)}, answer {_sdp_summary(answer)}"
-        self._ingests[target] = (summary, time.monotonic())
+        self._ingests[target] = (summary, offered, time.monotonic())
         _LOGGER.debug("Session pushed into %s: %s", target, summary)
         return restore(answer)
 
-    async def async_video_report(self, stream: str | None = None) -> str:
-        """Where a pushed session stands, to explain missing video."""
+    def ingest_times(self, stream: str | None = None) -> tuple[float, float] | None:
+        """When the stream's last offer was received and answered (monotonic)."""
+        ingest = self._ingests.get(stream or self.stream)
+        return (ingest[1], ingest[2]) if ingest is not None else None
+
+    async def async_video_report(
+        self, stream: str | None = None, watch: _SessionWatch | None = None
+    ) -> str:
+        """Where a pushed session stands, to explain missing video.
+
+        With ``watch``, also what the session did while its video was awaited.
+        """
         target = stream or self.stream
         ingest = self._ingests.get(target)
         if ingest is None:
             pushed = "no offer pushed"
         else:
-            summary, answered = ingest
+            summary, _, answered = ingest
             pushed = f"{summary}, answered {time.monotonic() - answered:.1f} s ago"
         try:
             async with asyncio.timeout(REPORT_TIMEOUT):
                 state = _pushed_summary(await self._streams(target))
         except (Go2RtcError, TimeoutError) as err:
             state = f"go2rtc unreachable ({type(err).__name__})"
+        if watch is not None:
+            state += f"; {watch.summary()}"
         return f"{state}; {pushed}"
 
-    async def async_video_flowing(self, stream: str | None = None) -> bool:
-        """True once go2rtc receives video from a pushed session."""
-        info = await self._streams(stream)
+    @staticmethod
+    def _video_flowing(info: dict[str, Any] | None) -> bool:
         for producer in (info or {}).get("producers") or []:
             for receiver in producer.get("receivers") or []:
                 codec = receiver.get("codec") or {}
@@ -334,18 +424,30 @@ class Go2RtcBridge:
                     return True
         return False
 
+    async def async_video_flowing(self, stream: str | None = None) -> bool:
+        """True once go2rtc receives video from a pushed session."""
+        return self._video_flowing(await self._streams(stream))
+
     async def async_wait_video(
         self, limit: float, interval: float = 0.25, stream: str | None = None
     ) -> None:
-        """Wait until video flows; raise Go2RtcError after ``limit`` seconds."""
+        """Wait until video flows; raise Go2RtcError after ``limit`` seconds.
+
+        The error tells what the pushed session did meanwhile: go2rtc forgets
+        a session whose connection ended, so it is followed at each poll.
+        """
+        times = self.ingest_times(stream)
+        watch = _SessionWatch(times[1]) if times else _SessionWatch()
         try:
             async with asyncio.timeout(limit):
                 while True:
-                    if await self.async_video_flowing(stream):
+                    info = await self._streams(stream)
+                    watch.note(info)
+                    if self._video_flowing(info):
                         return
                     await asyncio.sleep(interval)
         except TimeoutError as err:
-            report = await self.async_video_report(stream)
+            report = await self.async_video_report(stream, watch)
             raise Go2RtcError(f"No video received ({report})") from err
 
     async def async_frame(self, stream: str | None = None) -> bytes:

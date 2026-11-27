@@ -50,17 +50,50 @@ go2rtc, then waits 20 seconds for video. When none comes, the `camera_failed`
 problem says how far the session got, for example:
 
 ```text
-No video received (pushed session: no track, 0 bytes received; offer audio+video, 2 candidates, answer audio+video, 1 candidates, answered 20.1 s ago)
+No video received (no pushed session; seen from 1.2 s to 6.4 s with no track, 0 bytes received, path udp prflx by 1.2 s; offer audio+video, 4 candidates, answer audio+video, 8 candidates, answered 21.3 s ago)
 ```
 
-- **`no pushed session` / `no offer pushed`:** the session never reached
-  go2rtc.
-- **`pushed session: no track`:** go2rtc answered the offer but reports no
-  media: often the network path between go2rtc and the Aiphone relay
-  (firewall, UDP blocked, no usable candidate).
-- **`video 0 packets`:** the video track was set up but stayed empty.
+The first part is what go2rtc holds when the wait ends:
 
-Only media kinds and counts are reported, never addresses.
+- **`pushed session: no track`:** go2rtc still has the session but no media
+  reached it.
+- **`video 0 packets`:** the video track was set up but stayed empty.
+- **`no pushed session`:** go2rtc has no session any more. It drops a
+  session as soon as its connection ends (closed by the Aiphone relay, lost,
+  or failed encryption).
+- **`no offer pushed`** (last part): the session never reached go2rtc.
+
+The second part is what the session did during the wait, in seconds after
+go2rtc answered the offer:
+
+- **`seen from … to …`:** when go2rtc listed the session, and what it had
+  received when last seen. Without `to`, it is still there.
+- **`path udp prflx by …`:** go2rtc found a network path to the Aiphone
+  relay: its transport (`udp`, `tcp`) and the kind of address of the relay
+  (`host`, `srflx`, `prflx`, `relay`).
+- **`no path found`:** go2rtc never reached the relay: firewall, UDP
+  blocked, no usable candidate. go2rtc keeps such a session 30 seconds, so
+  it is still listed when the wait ends.
+- **`never seen`:** go2rtc never listed the session.
+
+Only media kinds, counts, transports and kinds of address are reported, never
+addresses.
+
+The diagnostics also list the last session starts of the cameras
+(`camera_sessions`): the station, what the session was for (`image`,
+`live_view`, `command`), whether video came (`video`, `no_video`, `failed: …`,
+`interrupted`), and how long each step took, in seconds after the start:
+
+| Field | Step |
+| --- | --- |
+| `request_s` | The stream is ready, the station is asked for a session |
+| `offer_s` | The relay's offer is received |
+| `answer_s` | go2rtc answered it |
+| `negotiated_s` | The station accepted the answer |
+| `video_s` | First video packets (or `failed_s`: when the start failed) |
+
+A problem is reported once per kind of error until an image succeeds; this
+list tells every session that got no video.
 
 ## Monitoring sessions left open
 

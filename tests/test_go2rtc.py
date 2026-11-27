@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import re
 from types import SimpleNamespace
 
 import aiohttp
@@ -22,6 +24,7 @@ from custom_components.aiphone_jo.go2rtc import (
     Go2RtcServer,
     _pushed_summary,
     _sdp_summary,
+    _session_path,
     async_check_server,
     async_get_server,
 )
@@ -159,8 +162,70 @@ async def test_wait_video(bridge: Go2RtcBridge, go2rtc: FakeGo2Rtc) -> None:
     # The error says how far the session got, without any address.
     message = str(err.value)
     assert message.startswith("No video received (pushed session: no track; ")
+    # What the session did meanwhile: still there, and its path was found.
+    assert re.search(r"; seen from 0\.\d s, path udp prflx by 0\.\d s; ", message)
     assert "offer audio+video, 2 candidates, answer " in message
     assert "198.51.100" not in message
+
+
+async def test_wait_video_session_that_left(
+    bridge: Go2RtcBridge, go2rtc: FakeGo2Rtc
+) -> None:
+    """go2rtc forgets a session whose connection ended: the error keeps its trace."""
+    await bridge.async_ensure_stream()
+    await bridge.async_ingest(JANUS_OFFER)
+    go2rtc.video = False
+    wait = asyncio.ensure_future(bridge.async_wait_video(0.6, interval=0.05))
+    await asyncio.sleep(0.2)
+    go2rtc.pushed.discard(bridge.stream)
+    with pytest.raises(Go2RtcError) as err:
+        await wait
+    message = str(err.value)
+    assert re.search(
+        r"\(no pushed session; seen from 0\.\d s to 0\.\d s with no track, "
+        r"path udp prflx by 0\.\d s; offer ",
+        message,
+    ), message
+    assert "198.51.100" not in message
+
+
+async def test_wait_video_session_without_path(
+    bridge: Go2RtcBridge, go2rtc: FakeGo2Rtc
+) -> None:
+    """A session that never reached its peer is told apart."""
+    await bridge.async_ensure_stream()
+    await bridge.async_ingest(JANUS_OFFER)
+    go2rtc.video = False
+    go2rtc.pushed_protocol = "http"
+    go2rtc.pushed_remote = ""
+    with pytest.raises(Go2RtcError, match=r"seen from 0\.\d s, no path found; "):
+        await bridge.async_wait_video(0.2, interval=0.05)
+
+
+@pytest.mark.parametrize(
+    ("producer", "expected"),
+    [
+        ({"protocol": "http"}, None),
+        ({}, None),
+        (
+            {"protocol": "http+udp", "remote_addr": "198.51.100.1:20000 prflx"},
+            "udp prflx",
+        ),
+        (
+            {
+                "protocol": "http+tcp",
+                "remote_addr": "198.51.100.1:20000 relay 198.51.100.2:3478",
+            },
+            "tcp relay",
+        ),
+        # Never anything else than the known words: no address can slip in.
+        ({"protocol": "http+udp", "remote_addr": "198.51.100.1:20000"}, "udp"),
+        ({"protocol": "http+198.51.100.1", "remote_addr": "a 198.51.100.1"}, "unknown"),
+    ],
+)
+def test_session_path(producer: dict, expected: str | None) -> None:
+    """The path of a session is its transport and candidate type only."""
+    assert _session_path(producer) == expected
 
 
 async def test_wait_video_without_session(
@@ -168,7 +233,9 @@ async def test_wait_video_without_session(
 ) -> None:
     """Without any offer pushed, the error says so."""
     await bridge.async_ensure_stream()
-    with pytest.raises(Go2RtcError, match=r"no pushed session; no offer pushed"):
+    with pytest.raises(
+        Go2RtcError, match=r"no pushed session; never seen; no offer pushed"
+    ):
         await bridge.async_wait_video(0.1, interval=0.05)
 
 

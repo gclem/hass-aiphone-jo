@@ -79,3 +79,4 @@ async def test_diagnostics_of_paired_monitor(
     assert health["reconnections"] == 0
     assert health["problems"] == []
     assert diagnostics["last_call"] is None
+    assert diagnostics["camera_sessions"] == []

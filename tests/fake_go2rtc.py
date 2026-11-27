@@ -132,6 +132,9 @@ class FakeGo2Rtc:
     sessions: dict[str, list[int]] = field(default_factory=dict)
     _session_count: int = 0
     video: bool = True
+    # Like go2rtc once a pushed session selected a path to its peer.
+    pushed_protocol: str = "http+udp"
+    pushed_remote: str = "198.51.100.1:20000 prflx"
     rtsp: bool = True
     pushed: set[str] = field(default_factory=set)
     deleted: list[str] = field(default_factory=list)
@@ -187,7 +190,14 @@ class FakeGo2Rtc:
                 if self.video
                 else []
             )
-            producers.append({"format_name": "webrtc", "receivers": receivers})
+            producers.append(
+                {
+                    "format_name": "webrtc",
+                    "protocol": self.pushed_protocol,
+                    "remote_addr": self.pushed_remote,
+                    "receivers": receivers,
+                }
+            )
         return web.json_response({"producers": producers})
 
     async def _put_streams(self, request: web.Request) -> web.Response:

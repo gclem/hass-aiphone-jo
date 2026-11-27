@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections import deque
 from collections.abc import Awaitable, Callable
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
@@ -33,6 +34,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later
+from homeassistant.util import dt as dt_util
 from webrtc_models import RTCIceCandidateInit
 
 from .api import Station
@@ -62,6 +64,23 @@ LIVE_IMAGE_WAIT = 8.0
 FIRST_IMAGE_WAIT = 15.0
 FIRST_IMAGE_POLL = 0.5
 SESSION_POLL = 1.0
+# Session starts kept for the diagnostics, with their timings and outcome.
+JOURNAL_SIZE = 30
+# In the order of the steps: lock and stream ready, offer received from the
+# relay, answered by go2rtc, session negotiated, first video packets.
+JOURNAL_KEYS = (
+    "station_id",
+    "purpose",
+    "started_at",
+    "result",
+    "request_s",
+    "offer_s",
+    "answer_s",
+    "negotiated_s",
+    "video_s",
+    "failed_s",
+    "detail",
+)
 # Seconds the live session is kept after the last viewer left, so a viewer that
 # reconnects (dashboard reload, dialog reopened) does not open a new session.
 VIEWER_GRACE = 5.0
@@ -193,6 +212,8 @@ class CameraMedia:
         # already left: their viewer is dropped as soon as the start returns.
         self._opening: set[str] = set()
         self._left_early: set[str] = set()
+        # Last session starts: what for, how long each step took, the outcome.
+        self._journal: deque[dict[str, Any]] = deque(maxlen=JOURNAL_SIZE)
 
     # ------------------------------------------------------------ status
 
@@ -260,6 +281,14 @@ class CameraMedia:
     def _async_refused_expired(self, _now: Any) -> None:
         self._refused_timer = None
         self.async_notify()
+
+    @property
+    def journal(self) -> list[dict[str, Any]]:
+        """Last session starts, for the diagnostics (no identifier, no address)."""
+        return [
+            {key: entry[key] for key in JOURNAL_KEYS if key in entry}
+            for entry in self._journal
+        ]
 
     def cached_image(self, station_id: int) -> bytes | None:
         """Last image of the station, if any."""
@@ -368,6 +397,61 @@ class CameraMedia:
     async def _async_start(
         self, station: Station, viewer: bool = False, wait_video: bool = True
     ) -> None:
+        """Start a session of the station, recorded in the journal."""
+        purpose = "command"
+        if viewer:
+            purpose = "live_view"
+        elif wait_video:
+            purpose = "image"
+        entry: dict[str, Any] = {
+            "station_id": station.id,
+            "purpose": purpose,
+            "started_at": dt_util.now().isoformat(),
+            "result": "starting",
+        }
+        self._journal.append(entry)
+        started = time.monotonic()
+
+        def mark(step: str) -> None:
+            entry[step] = round(time.monotonic() - started, 1)
+
+        try:
+            await self._async_start_session(station, viewer, wait_video, mark)
+        except Go2RtcError as err:
+            # "No video received" tells how far the session got.
+            entry["result"] = "failed: Go2RtcError"
+            if str(err).startswith("No video received"):
+                entry["result"] = "no_video"
+            entry["detail"] = str(err)
+            mark("failed_s")
+            raise
+        except asyncio.CancelledError:
+            entry["result"] = "interrupted"
+            mark("failed_s")
+            raise
+        except Exception as err:
+            entry["result"] = f"failed: {type(err).__name__}"
+            mark("failed_s")
+            raise
+        else:
+            # Commands do not wait for the video of their session.
+            entry["result"] = "negotiated"
+            if wait_video:
+                entry["result"] = "video"
+        finally:
+            bridge = self._bridge
+            times = bridge.ingest_times() if bridge is not None else None
+            if times is not None and times[0] >= started:
+                entry["offer_s"] = round(times[0] - started, 1)
+                entry["answer_s"] = round(times[1] - started, 1)
+
+    async def _async_start_session(
+        self,
+        station: Station,
+        viewer: bool,
+        wait_video: bool,
+        mark: Callable[[str], None],
+    ) -> None:
         bridge = self._bridge
         assert bridge is not None
         client: Any = self._runtime.client
@@ -389,10 +473,12 @@ class CameraMedia:
             # session it starts anyway would keep the station busy.
             self._starting = (station.id, viewer)
             self.async_notify()
+            mark("request_s")
             try:
                 await live.__aenter__()
             finally:
                 self._starting = None
+        mark("negotiated_s")
         self._live = live
         self._live_station = station.id
         self.async_notify()
@@ -406,6 +492,7 @@ class CameraMedia:
         except Go2RtcError:
             await self._async_stop()
             raise
+        mark("video_s")
 
     async def _async_watch(self, live: Any, renew: bool) -> None:
         """Stop when the session ends, or when renewing it failed."""
