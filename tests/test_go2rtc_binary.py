@@ -8,6 +8,7 @@ continuous live view also needs ffmpeg on the go2rtc host.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import itertools
 import os
 import re
@@ -185,7 +186,13 @@ async def bridge(socket_enabled: None) -> Any:
     assert GO2RTC_URL
     session = aiohttp.ClientSession()
     server = Go2RtcServer(GO2RTC_URL, session)
-    yield Go2RtcBridge(server, f"aiphone_jo_test_{os.getpid()}")
+    bridge = Go2RtcBridge(server, f"aiphone_jo_test_{os.getpid()}")
+    yield bridge
+    # A session left in the stream (one that never connected stays 30 seconds)
+    # would take the viewers of the next test: go2rtc serves them from the
+    # first session it lists.
+    with contextlib.suppress(Go2RtcError):
+        await bridge.async_delete_stream(bridge.stream)
     await session.close()
 
 
