@@ -2,7 +2,7 @@
 
 All notable changes to this integration.
 
-## Unreleased
+## 0.4.18
 
 - Closing the live view while it is still starting no longer leaves the
   camera streaming: the session used to stay open, renewed every minute,
