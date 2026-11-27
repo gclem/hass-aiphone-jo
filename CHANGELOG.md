@@ -4,6 +4,11 @@ All notable changes to this integration.
 
 ## Unreleased
 
+- Closing the live view while it is still starting no longer leaves the
+  camera streaming: the session used to stay open, renewed every minute,
+  until Home Assistant restarted, keeping the station busy for the images of
+  the other cameras. It now stops a few seconds after the start, like a
+  live view closed normally.
 - When a camera session gets no video ("No video received"), the problem
   message now says how far the session got: whether go2rtc received the
   pushed session, which tracks reached it and how many packets, and what the

@@ -189,6 +189,10 @@ class CameraMedia:
         self._command_until = 0.0
         self._refreshes: dict[int, asyncio.Task[bytes | None]] = {}
         self._viewers: dict[str, tuple[Go2RtcViewer, WebRTCSendMessage]] = {}
+        # Browsers whose live view is still starting, and those of them that
+        # already left: their viewer is dropped as soon as the start returns.
+        self._opening: set[str] = set()
+        self._left_early: set[str] = set()
 
     # ------------------------------------------------------------ status
 
@@ -859,6 +863,23 @@ class CameraMedia:
         if not self.available or bridge is None or station is None:
             send_message(WebRTCError("unavailable", "The camera is unavailable."))
             return
+        self._opening.add(session_id)
+        try:
+            await self._async_open_viewer(
+                bridge, station, session_id, offer_sdp, send_message
+            )
+        finally:
+            self._opening.discard(session_id)
+            self._left_early.discard(session_id)
+
+    async def _async_open_viewer(
+        self,
+        bridge: Go2RtcBridge,
+        station: Station,
+        session_id: str,
+        offer_sdp: str,
+        send_message: WebRTCSendMessage,
+    ) -> None:
         try:
             await self._async_acquire_for_viewer(station)
         except StationRingingError:
@@ -884,6 +905,10 @@ class CameraMedia:
                 WebRTCError("live_failed", f"The live view could not start ({reason}).")
             )
             return
+        if session_id in self._left_early:
+            # The browser left while the session started: nobody watches it.
+            await self.async_release(VIEWER_GRACE)
+            return
 
         def on_message(message: dict[str, Any]) -> None:
             kind, value = message.get("type"), message.get("value")
@@ -901,6 +926,10 @@ class CameraMedia:
             await self.async_release()
             send_message(WebRTCError("live_failed", "The live view could not start."))
             return
+        if session_id in self._left_early:
+            await viewer.async_close()
+            await self.async_release(VIEWER_GRACE)
+            return
         self._viewers[session_id] = (viewer, send_message)
         self.async_notify()
         await viewer.async_send("webrtc/offer", offer_sdp)
@@ -912,6 +941,10 @@ class CameraMedia:
 
     async def async_close_viewer(self, session_id: str) -> None:
         """A browser left the live view."""
+        if session_id in self._opening:
+            # Its live view is still starting: dropped once started.
+            self._left_early.add(session_id)
+            return
         if entry := self._viewers.pop(session_id, None):
             self.async_notify()
             await entry[0].async_close()

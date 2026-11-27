@@ -604,6 +604,35 @@ async def test_webrtc_viewer_grace(
     assert not client.lives[0].exited.is_set()
 
 
+async def test_webrtc_viewer_leaves_while_starting(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    go2rtc: FakeGo2Rtc,
+    hass_ws_client: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A browser that leaves before the live view starts does not keep it on."""
+    monkeypatch.setattr("custom_components.aiphone_jo.media.VIEWER_GRACE", 0.1)
+    client = _client(client_holder)
+    media = camera_entry.runtime_data.media
+    go2rtc.video = False
+    ws = await hass_ws_client(hass)
+    subscription = await _offer(ws)
+    (session,) = await _events(ws, 1)
+    assert session["type"] == "session"
+    # The session runs, waiting for video, when the browser leaves.
+    await until(lambda: media.live)
+    await ws.send_json_auto_id(
+        {"type": "unsubscribe_events", "subscription": subscription}
+    )
+    await ws.receive_json()
+    go2rtc.video = True
+    await until(lambda: client.lives[0].exited.is_set())
+    assert not media.live
+    assert go2rtc.viewers_open == 0
+
+
 async def test_webrtc_without_relay(
     hass: HomeAssistant,
     camera_entry: MockConfigEntry,
