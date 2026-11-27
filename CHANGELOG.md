@@ -2,7 +2,7 @@
 
 All notable changes to this integration.
 
-## Unreleased
+## 0.4.19
 
 - "No video received" now also tells what the session did while its video
   was awaited: when go2rtc listed it, whether it found a network path to the
