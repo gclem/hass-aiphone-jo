@@ -287,6 +287,70 @@ async def test_no_video(
     assert _client(client_holder).lives[0].exited.is_set()
 
 
+async def test_session_journal(
+    hass: HomeAssistant,
+    camera_entry: MockConfigEntry,
+    client_holder: ClientHolder,
+    go2rtc: FakeGo2Rtc,
+) -> None:
+    """Each session start is kept with its timings and whether video came.
+
+    Problems are reported once per kind of error: the journal still tells
+    every session that got no video.
+    """
+    media = camera_entry.runtime_data.media
+    await _image(hass)
+    go2rtc.video = False
+    for _ in range(2):
+        _age_cache(camera_entry, 31)
+        assert await _image(hass) == JPEG
+        await _settle(hass)
+    client = _client(client_holder)
+    client.live_errors[101] = StationBusyError("busy", mid="24021", rslt=486)
+    _age_cache(camera_entry, 31)
+    media._refused.clear()
+    assert await _image(hass) == JPEG
+    await _settle(hass)
+
+    journal = media.journal
+    assert [entry["result"] for entry in journal] == [
+        "video",
+        "no_video",
+        "no_video",
+        "failed: StationBusyError",
+    ]
+    assert {entry["station_id"] for entry in journal} == {101}
+    assert {entry["purpose"] for entry in journal} == {"image"}
+    done = journal[0]
+    assert list(done) == [
+        "station_id",
+        "purpose",
+        "started_at",
+        "result",
+        "request_s",
+        "offer_s",
+        "answer_s",
+        "negotiated_s",
+        "video_s",
+    ]
+    assert (
+        0
+        <= done["request_s"]
+        <= done["offer_s"]
+        <= done["answer_s"]
+        <= done["negotiated_s"]
+        <= done["video_s"]
+    )
+    failed = journal[1]
+    assert "video_s" not in failed
+    assert failed["failed_s"] >= 0.5
+    assert failed["detail"].startswith("No video received (pushed session: no track")
+    assert "198.51.100" not in failed["detail"]
+    busy = journal[3]
+    assert "detail" not in busy and "offer_s" not in busy
+    assert len(camera_entry.runtime_data.health.as_diagnostics()["problems"]) == 2
+
+
 async def test_busy_station_keeps_its_camera(
     hass: HomeAssistant, camera_entry: MockConfigEntry, client_holder: ClientHolder
 ) -> None:

@@ -2,6 +2,19 @@
 
 All notable changes to this integration.
 
+## Unreleased
+
+- "No video received" now also tells what the session did while its video
+  was awaited: when go2rtc listed it, whether it found a network path to the
+  Aiphone relay (transport and kind of address, never an address), and when
+  go2rtc dropped it. go2rtc forgets a session whose connection ended, so a
+  session that connected then ended was reported like one that never
+  arrived.
+- The diagnostics list the last session starts of the cameras
+  (`camera_sessions`): station, purpose, whether video came, and how long
+  each step took. Problems are reported once per kind of error, so repeated
+  failures were not all visible.
+
 ## 0.4.18
 
 - Closing the live view while it is still starting no longer leaves the

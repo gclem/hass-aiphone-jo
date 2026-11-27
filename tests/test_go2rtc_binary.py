@@ -23,13 +23,18 @@ import pytest
 from custom_components.aiphone_jo.go2rtc import (
     PLACEHOLDER_SOURCE,
     Go2RtcBridge,
+    Go2RtcError,
     Go2RtcServer,
 )
 from custom_components.aiphone_jo.talk import TalkPath, TalkServer
 
 aiortc = pytest.importorskip("aiortc")
 from aiortc import RTCPeerConnection, RTCRtpSender, RTCSessionDescription  # noqa: E402
-from aiortc.mediastreams import AudioStreamTrack, VideoStreamTrack  # noqa: E402
+from aiortc.mediastreams import (  # noqa: E402
+    AudioStreamTrack,
+    MediaStreamTrack,
+    VideoStreamTrack,
+)
 
 GO2RTC_URL = os.environ.get("GO2RTC_URL")
 pytestmark = pytest.mark.skipif(not GO2RTC_URL, reason="GO2RTC_URL is not set")
@@ -65,18 +70,38 @@ async def _gathered(pc: RTCPeerConnection) -> str:
         await asyncio.sleep(0.05)
 
 
-async def _relay(
-    bridge: Go2RtcBridge, stream: str | None = None, audio_direction: str = "sendonly"
-) -> RTCPeerConnection:
-    """Push a session into the stream like the relay does."""
+class _SilentVideoTrack(MediaStreamTrack):
+    """Video track that never gives a frame: a session connects, without video."""
+
+    kind = "video"
+
+    async def recv(self) -> Any:
+        await asyncio.Future()
+
+
+async def _relay_offer(
+    audio_direction: str = "sendonly", video: MediaStreamTrack | None = None
+) -> tuple[RTCPeerConnection, str]:
+    """Peer sending audio and video, with its offer shaped like the relay's."""
     pc = RTCPeerConnection()
     audio = pc.addTransceiver(AudioStreamTrack(), direction=audio_direction)
-    video = pc.addTransceiver(VideoStreamTrack(), direction="sendonly")
+    sender = pc.addTransceiver(video or VideoStreamTrack(), direction="sendonly")
     audio.setCodecPreferences(_codecs("audio", "audio/PCMU"))
-    video.setCodecPreferences(_codecs("video", "video/H264"))
+    sender.setCodecPreferences(_codecs("video", "video/H264"))
     offer = _as_relay_offer(await _gathered(pc))
     assert "a=mid:audio" in offer
     assert "sdes:mid" in offer
+    return pc, offer
+
+
+async def _relay(
+    bridge: Go2RtcBridge,
+    stream: str | None = None,
+    audio_direction: str = "sendonly",
+    video: MediaStreamTrack | None = None,
+) -> RTCPeerConnection:
+    """Push a session into the stream like the relay does."""
+    pc, offer = await _relay_offer(audio_direction, video)
     answer = await bridge.async_ingest(offer, stream)
     assert "a=mid:audio" in answer
     assert "a=inactive" not in answer
@@ -186,6 +211,51 @@ async def test_relay_session_through_go2rtc(bridge: Go2RtcBridge) -> None:
             assert image.startswith(b"\xff\xd8")
     finally:
         await relay.close()
+
+
+async def test_report_of_a_session_that_left(bridge: Go2RtcBridge) -> None:
+    """go2rtc forgets a session whose peer left; the error keeps its trace.
+
+    The session connects but sends no video, then its peer closes it, like a
+    relay that gives up: go2rtc lists it no more when the wait ends.
+    """
+    await bridge.async_reset_stream()
+    relay = await _relay(bridge, video=_SilentVideoTrack())
+    wait = asyncio.ensure_future(bridge.async_wait_video(16))
+    try:
+        await asyncio.sleep(3)
+    finally:
+        await relay.close()
+    with pytest.raises(Go2RtcError) as err:
+        await wait
+    message = str(err.value)
+    assert "(no pushed session; seen from " in message, message
+    assert re.search(
+        r" to \d+\.\d s with .+, path (udp|tcp)( \w+)? by \d+\.\d s; offer ", message
+    ), message
+    # No address of the peer, only its transport and candidate type.
+    assert not re.search(r"\d+\.\d+\.\d+\.\d+", message), message
+
+
+async def test_report_of_a_session_without_path(bridge: Go2RtcBridge) -> None:
+    """A session that never reaches its peer is still listed after 20 seconds.
+
+    go2rtc only gives up on it after 30 seconds, past the integration's
+    video timeout: "no pushed session" in the error therefore means that a
+    connected session ended, not that the peer could not be reached.
+    """
+    await bridge.async_reset_stream()
+    pc, offer = await _relay_offer()
+    await pc.close()
+    # A peer nobody answers for (documentation address, RFC 5737).
+    unreachable = "a=candidate:1 1 udp 2130706431 192.0.2.1 50000 typ host"
+    offer = re.sub(r"^a=candidate:.*$", unreachable, offer, flags=re.M)
+    await bridge.async_ingest(offer)
+    with pytest.raises(Go2RtcError) as err:
+        await bridge.async_wait_video(21)
+    message = str(err.value)
+    assert "(pushed session: no track" in message, message
+    assert re.search(r"; seen from \d+\.\d s, no path found; offer ", message), message
 
 
 async def test_next_session_on_same_stream(bridge: Go2RtcBridge) -> None:

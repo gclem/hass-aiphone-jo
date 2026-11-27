@@ -64,4 +64,6 @@ async def async_get_config_entry_diagnostics(
         diagnostics["last_call"] = _last_call(runtime)
         # Without the session ids (they contain the client id).
         diagnostics["sessions"] = session_diagnostics(runtime.client.session_history)
+        # Session starts of the cameras: what for, step timings, video or not.
+        diagnostics["camera_sessions"] = runtime.media.journal
     return diagnostics
